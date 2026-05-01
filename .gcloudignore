@@ -1,0 +1,7 @@
+.git
+node_modules
+.playwright-mcp
+bryllim-full.png
+bryllim-snapshot*.md
+live.html
+README.md

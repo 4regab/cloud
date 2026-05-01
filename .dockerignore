@@ -1,0 +1,7 @@
+node_modules
+npm-debug.log
+.git
+.playwright-mcp
+bryllim-full.png
+bryllim-snapshot*.md
+live.html
