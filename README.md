@@ -5,7 +5,7 @@ Plain HTML/CSS/JavaScript portfolio served by Cloud Run, with private media asse
 ## Architecture
 
 - **Cloud Run** serves the portfolio, proxies `/assets`, and owns `/api/chat`.
-- **Cloud Storage** stores the media assets privately.
+- **Cloud Storage** stores the media assets privately; Cloud CDN can be added in front of `/assets` later if you front the bucket with an HTTPS load balancer.
 - **Secret Manager** stores `GEMINI_API_KEY`.
 - **Cloud Build** builds and pushes the container image to Artifact Registry.
 - **Gemini API** uses `gemma-4` to answer from the Markdown knowledge base.
@@ -112,7 +112,7 @@ export GLOBAL_RATE_LIMIT="500"
 chmod +x ./deploy-cloudshell.sh && ./deploy-cloudshell.sh \
   --project "your-project-id" \
   --region "asia-southeast1" \
-  --service "bryllim-site" \
+  --service "bryl" \
   --bucket "your-project-id-bryllim-assets"
 ```
 
@@ -126,12 +126,13 @@ The Cloud Shell deploy script creates or reuses:
 - Artifact Registry Docker repository: `bryllim`
 - Cloud Storage bucket: `<project-id>-bryllim-assets`
 - Secret Manager secret: `gemini-api-key`
-- Cloud Run service: `bryllim-site`
+- Cloud Run service: `bryl`
 
 It also:
 
 - uploads `public/assets` to a private Cloud Storage bucket
 - serves media through Cloud Run at `/assets`
+- can be fronted by Cloud CDN later without exposing the bucket directly
 - sets long-lived cache headers on media assets in Cloud Storage
 - builds the container with Cloud Build
 - deploys Cloud Run with unauthenticated public access
@@ -159,7 +160,7 @@ Open the **Service URL** and verify:
 You can also check from Cloud Shell:
 
 ```bash
-curl "$(gcloud run services describe bryllim-site --region asia-southeast1 --format='value(status.url)')/healthz"
+curl "$(gcloud run services describe bryl --region asia-southeast1 --format='value(status.url)')/healthz"
 ```
 
 Expected response:
@@ -240,7 +241,7 @@ The app uses a strict CSP with per-request nonces. If you see this after deploym
 Check Cloud Run logs first:
 
 ```bash
-gcloud run services logs read bryllim-site --region asia-southeast1 --limit 50
+gcloud run services logs read bryl --region asia-southeast1 --limit 50
 ```
 
 Common causes:

@@ -3,7 +3,7 @@ set -euo pipefail
 
 PROJECT_ID="${PROJECT_ID:-}"
 REGION="${REGION:-asia-southeast1}"
-SERVICE_NAME="${SERVICE_NAME:-bryllim-site}"
+SERVICE_NAME="${SERVICE_NAME:-bryl}"
 BUCKET_NAME="${BUCKET_NAME:-}"
 ARTIFACT_REPO="${ARTIFACT_REPO:-bryllim}"
 GEMINI_MODEL="${GEMINI_MODEL:-gemma-4}"
@@ -23,7 +23,7 @@ Usage:
 
 Optional:
   --region REGION                  Default: asia-southeast1
-  --service SERVICE_NAME            Default: bryllim-site
+  --service SERVICE_NAME            Default: bryl
   --bucket BUCKET_NAME              Default: PROJECT_ID-bryllim-assets
   --repo ARTIFACT_REPO              Default: bryllim
   --model GEMINI_MODEL              Default: gemma-4

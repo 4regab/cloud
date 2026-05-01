@@ -2,10 +2,10 @@ import express from "express";
 import { rateLimit } from "express-rate-limit";
 import helmet from "helmet";
 import { GoogleGenAI } from "@google/genai";
-import { Storage } from "@google-cloud/storage";
 import { access, readFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
+import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -18,8 +18,6 @@ const geminiModel = process.env.GEMINI_MODEL || "gemma-4";
 const apiKey = process.env.GEMINI_API_KEY;
 const genAI = apiKey ? new GoogleGenAI({ apiKey }) : null;
 const assetBucketName = process.env.ASSET_BUCKET_NAME || process.env.BUCKET_NAME || "";
-const assetStorage = assetBucketName ? new Storage() : null;
-const assetBucket = assetStorage ? assetStorage.bucket(assetBucketName) : null;
 const chatWindowMs = Number(process.env.CHAT_RATE_LIMIT_WINDOW_MS || 60_000);
 const chatLimit = Number(process.env.CHAT_RATE_LIMIT || 10);
 const globalWindowMs = Number(process.env.GLOBAL_RATE_LIMIT_WINDOW_MS || 15 * 60_000);
@@ -31,6 +29,10 @@ const allowedChatOrigins = (process.env.ALLOWED_CHAT_ORIGINS || "")
   .map((origin) => origin.trim())
   .filter(Boolean);
 let knowledgeCache;
+let gcsTokenCache = {
+  token: null,
+  expiresAt: 0
+};
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use((_req, res, next) => {
@@ -75,6 +77,50 @@ function normalizeAssetPath(requestPath) {
   return normalized;
 }
 
+async function getGcsAccessToken() {
+  if (gcsTokenCache.token && Date.now() < gcsTokenCache.expiresAt - 30_000) {
+    return gcsTokenCache.token;
+  }
+
+  const response = await fetch("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token", {
+    headers: {
+      "Metadata-Flavor": "Google"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Failed to fetch GCS access token: ${response.status}`);
+  }
+
+  const payload = await response.json();
+  gcsTokenCache = {
+    token: payload.access_token,
+    expiresAt: Date.now() + Number(payload.expires_in || 0) * 1000
+  };
+
+  return gcsTokenCache.token;
+}
+
+async function fetchGcsObjectMetadata(assetPath) {
+  const token = await getGcsAccessToken();
+  const objectName = encodeURIComponent(assetPath);
+  const response = await fetch(
+    `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(assetBucketName)}/o/${objectName}?fields=contentType,cacheControl,etag,updated,name`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    }
+  );
+
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(`Failed to load asset metadata: ${response.status}`);
+  }
+
+  return response.json();
+}
+
 app.get("/assets/*", async (req, res, next) => {
   const assetPath = normalizeAssetPath(req.params[0]);
   if (!assetPath) {
@@ -92,26 +138,48 @@ app.get("/assets/*", async (req, res, next) => {
     // Fall through to the private Cloud Storage bucket.
   }
 
-  if (!assetBucket) {
+  if (!assetBucketName) {
     res.status(404).json({ error: "Asset not found." });
     return;
   }
 
   try {
-    const file = assetBucket.file(assetPath);
-    const [exists] = await file.exists();
-    if (!exists) {
+    const metadata = await fetchGcsObjectMetadata(assetPath);
+    if (!metadata) {
       res.status(404).json({ error: "Asset not found." });
       return;
     }
 
-    const [metadata] = await file.getMetadata();
+    const token = await getGcsAccessToken();
+    const objectName = encodeURIComponent(assetPath);
+    const response = await fetch(
+      `https://storage.googleapis.com/storage/v1/b/${encodeURIComponent(assetBucketName)}/o/${objectName}?alt=media`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      }
+    );
+
+    if (response.status === 404) {
+      res.status(404).json({ error: "Asset not found." });
+      return;
+    }
+
+    if (!response.ok) {
+      throw new Error(`Failed to stream asset: ${response.status}`);
+    }
+
     if (metadata.contentType) res.type(metadata.contentType);
     if (metadata.cacheControl) res.setHeader("Cache-Control", metadata.cacheControl);
     if (metadata.etag) res.setHeader("ETag", metadata.etag);
     if (metadata.updated) res.setHeader("Last-Modified", metadata.updated);
 
-    file.createReadStream().on("error", next).pipe(res);
+    if (!response.body) {
+      throw new Error("Asset response body was empty.");
+    }
+
+    Readable.fromWeb(response.body).on("error", next).pipe(res);
   } catch (error) {
     next(error);
   }
