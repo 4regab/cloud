@@ -1,14 +1,14 @@
 # Bryl Lim Portfolio on Cloud Run
 
-Plain HTML/CSS/JavaScript portfolio served by Cloud Run, with same-origin media assets and a Gemini 2.5 Flash-Lite chatbot endpoint.
+Plain HTML/CSS/JavaScript portfolio served by Cloud Run, with private media assets stored in Cloud Storage and served through the Cloud Run domain, plus a Gemini 2.5 Flash-Lite chatbot endpoint.
 
 ## Architecture
 
-- **Cloud Run** serves the portfolio, static assets, and owns `/api/chat`.
-- **Cloud Storage** is optional backup storage for copied assets during deploy.
+- **Cloud Run** serves the portfolio, proxies `/assets`, and owns `/api/chat`.
+- **Cloud Storage** stores the media assets privately.
 - **Secret Manager** stores `GEMINI_API_KEY`.
 - **Cloud Build** builds and pushes the container image to Artifact Registry.
-- **Gemini API** uses `gemini-2.5-flash-lite` to answer from the Markdown knowledge base.
+- **Gemini API** uses `gemma-4` to answer from the Markdown knowledge base.
 - **Markdown knowledge base** lives at `public/context.md`.
 
 ## Deploy From Google Cloud Console
@@ -20,7 +20,7 @@ Deployment has two parts:
 1. **Clone or upload the repo into Cloud Shell.** This gives Cloud Shell the source code.
 2. **Run the deploy script.** This configures Google Cloud resources and deploys Cloud Run.
 
-Cloning the repo alone does not create Cloud Run, Cloud Storage (optional backup), Secret Manager, or Gemini configuration.
+Cloning the repo alone does not create Cloud Run, Cloud Storage, Secret Manager, or Gemini configuration.
 
 ### 1. Prepare Your GCP Project
 
@@ -105,7 +105,7 @@ Optional custom settings:
 
 ```bash
 export GEMINI_API_KEY="your-gemini-api-key"
-export GEMINI_MODEL="gemini-2.5-flash-lite"
+export GEMINI_MODEL="gemma-4"
 export CHAT_RATE_LIMIT="10"
 export GLOBAL_RATE_LIMIT="500"
 
@@ -130,8 +130,9 @@ The Cloud Shell deploy script creates or reuses:
 
 It also:
 
-- optionally uploads `public/assets` to a private Cloud Storage bucket for backup
-- sets long-lived cache headers on copied bucket assets
+- uploads `public/assets` to a private Cloud Storage bucket
+- serves media through Cloud Run at `/assets`
+- sets long-lived cache headers on media assets in Cloud Storage
 - builds the container with Cloud Build
 - deploys Cloud Run with unauthenticated public access
 - injects `GEMINI_API_KEY` into Cloud Run from Secret Manager
@@ -195,8 +196,9 @@ To skip re-uploading assets:
 Runtime environment variables:
 
 - `GEMINI_API_KEY`: Gemini API key. Set through Secret Manager by the deploy script.
-- `GEMINI_MODEL`: Gemini chat model. Defaults to `gemini-2.5-flash-lite`.
-- `ASSET_BASE_URL`: asset base path/url. Defaults to `/assets`.
+- `GEMINI_MODEL`: Gemini chat model. Defaults to `gemma-4`.
+- `ASSET_BASE_URL`: asset path. Defaults to `/assets`.
+- `ASSET_BUCKET_NAME`: private Cloud Storage bucket used by Cloud Run to serve media.
 - `GLOBAL_RATE_LIMIT`: requests per visitor window across the site. Defaults to `500`.
 - `GLOBAL_RATE_LIMIT_WINDOW_MS`: global limiter window. Defaults to `900000`.
 - `CHAT_RATE_LIMIT`: chat messages per visitor window. Defaults to `10`.
@@ -221,10 +223,10 @@ Without `GEMINI_API_KEY`, the portfolio still works and `/api/chat` returns a se
 ## Security Notes
 
 - Gemini API keys are stored in Secret Manager and injected into Cloud Run only at runtime.
-- Chat uses `gemini-2.5-flash-lite` with `public/context.md` as strict context.
+- Chat uses `gemma-4` with `public/context.md` as strict context.
 - `/api/chat` is protected by same-origin checks, JSON body size limits, global rate limiting, and chat-specific rate limiting.
 - Rate limiting is in Cloud Run instance memory. For stronger multi-instance abuse protection, add Cloud Armor, reCAPTCHA/Turnstile, or a shared Redis-backed limiter.
-- Cloud Storage assets are kept private by deploy scripts. Media is served from the Cloud Run domain (`/assets`).
+- Cloud Storage is private; Cloud Run reads media from it and serves the files from the app domain.
 - For stricter production IAM, replace the default Cloud Run runtime service account with a dedicated service account that can access only the Gemini secret.
 
 ## Troubleshooting
@@ -245,7 +247,7 @@ Common causes:
 
 - `GEMINI_API_KEY` is missing, invalid, or has no Gemini API access.
 - `public/context.md` is missing from the deployed container.
-- The selected Gemini model is unavailable for the API key/project. Default is `gemini-2.5-flash-lite`.
+- The selected Gemini model is unavailable for the API key/project. Default is `gemma-4`.
 - Gemini quota or rate limits were exceeded.
 
 ### Update chatbot knowledge
@@ -269,11 +271,3 @@ npm run assets:webp
 
 The script converts PNG files under `public/assets` to WebP and skips `public/assets/favicons`.
 
-## Local Windows Deployment
-
-This is optional. Prefer Cloud Shell for GCP Console deployment.
-
-```powershell
-$env:GEMINI_API_KEY="your-gemini-api-key"
-.\deploy-cloudrun.ps1 -ProjectId "your-project-id"
-```

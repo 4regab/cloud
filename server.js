@@ -2,7 +2,8 @@ import express from "express";
 import { rateLimit } from "express-rate-limit";
 import helmet from "helmet";
 import { GoogleGenAI } from "@google/genai";
-import { readFile } from "node:fs/promises";
+import { Storage } from "@google-cloud/storage";
+import { access, readFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,10 +14,12 @@ const publicDir = path.join(__dirname, "public");
 const app = express();
 const port = process.env.PORT || 8080;
 const assetBaseUrl = (process.env.ASSET_BASE_URL || "/assets").replace(/\/$/, "");
-const geminiModel = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
+const geminiModel = process.env.GEMINI_MODEL || "gemma-4";
 const apiKey = process.env.GEMINI_API_KEY;
 const genAI = apiKey ? new GoogleGenAI({ apiKey }) : null;
-const assetOrigin = assetBaseUrl.startsWith("http") ? new URL(assetBaseUrl).origin : null;
+const assetBucketName = process.env.ASSET_BUCKET_NAME || process.env.BUCKET_NAME || "";
+const assetStorage = assetBucketName ? new Storage() : null;
+const assetBucket = assetStorage ? assetStorage.bucket(assetBucketName) : null;
 const chatWindowMs = Number(process.env.CHAT_RATE_LIMIT_WINDOW_MS || 60_000);
 const chatLimit = Number(process.env.CHAT_RATE_LIMIT || 10);
 const globalWindowMs = Number(process.env.GLOBAL_RATE_LIMIT_WINDOW_MS || 15 * 60_000);
@@ -41,7 +44,7 @@ app.use(
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'", (_req, res) => `'nonce-${res.locals.cspNonce}'`],
         styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", "data:", assetOrigin].filter(Boolean),
+        imgSrc: ["'self'", "data:"],
         connectSrc: ["'self'"],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],
@@ -61,6 +64,59 @@ app.use(
   })
 );
 app.use(express.json({ limit: "12kb", strict: true }));
+
+function normalizeAssetPath(requestPath) {
+  const cleaned = String(requestPath || "").replace(/^\/+/, "");
+  const normalized = path.posix.normalize(cleaned);
+  if (!normalized || normalized === "." || normalized.startsWith("..")) {
+    return null;
+  }
+
+  return normalized;
+}
+
+app.get("/assets/*", async (req, res, next) => {
+  const assetPath = normalizeAssetPath(req.params[0]);
+  if (!assetPath) {
+    res.status(400).json({ error: "Invalid asset path." });
+    return;
+  }
+
+  const localAssetPath = path.join(publicDir, "assets", assetPath);
+
+  try {
+    await access(localAssetPath);
+    res.sendFile(localAssetPath);
+    return;
+  } catch {
+    // Fall through to the private Cloud Storage bucket.
+  }
+
+  if (!assetBucket) {
+    res.status(404).json({ error: "Asset not found." });
+    return;
+  }
+
+  try {
+    const file = assetBucket.file(assetPath);
+    const [exists] = await file.exists();
+    if (!exists) {
+      res.status(404).json({ error: "Asset not found." });
+      return;
+    }
+
+    const [metadata] = await file.getMetadata();
+    if (metadata.contentType) res.type(metadata.contentType);
+    if (metadata.cacheControl) res.setHeader("Cache-Control", metadata.cacheControl);
+    if (metadata.etag) res.setHeader("ETag", metadata.etag);
+    if (metadata.updated) res.setHeader("Last-Modified", metadata.updated);
+
+    file.createReadStream().on("error", next).pipe(res);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.use(
   express.static(publicDir, {
     extensions: ["html"],
