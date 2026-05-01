@@ -105,7 +105,7 @@ if [[ -z "${GEMINI_API_KEY:-}" ]]; then
 fi
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ASSET_BASE_URL="https://storage.googleapis.com/${BUCKET_NAME}"
+ASSET_BASE_URL="/assets"
 IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REPO}/${SERVICE_NAME}"
 SECRET_FILE="$(mktemp)"
 
@@ -148,10 +148,6 @@ else
   echo "Cloud Storage bucket exists: gs://${BUCKET_NAME}"
 fi
 
-run "Allow public reads for portfolio media assets" gcloud storage buckets add-iam-policy-binding "gs://${BUCKET_NAME}" \
-  --member="allUsers" \
-  --role="roles/storage.objectViewer"
-
 if [[ "$SKIP_ASSET_UPLOAD" != "true" ]]; then
   run "Upload media assets to Cloud Storage" gcloud storage cp --recursive "${ROOT_DIR}/public/assets/"* "gs://${BUCKET_NAME}"
   run "Set long-lived cache headers on media assets" gcloud storage objects update "gs://${BUCKET_NAME}/**" \
@@ -187,4 +183,4 @@ SERVICE_URL="$(gcloud run services describe "$SERVICE_NAME" --region "$REGION" -
 echo
 echo "Deploy complete."
 echo "Service URL: ${SERVICE_URL}"
-echo "Asset URL:   ${ASSET_BASE_URL}"
+echo "Asset URL:   ${ASSET_BASE_URL} (served by Cloud Run domain)"

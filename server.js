@@ -41,7 +41,7 @@ app.use(
         defaultSrc: ["'self'"],
         scriptSrc: ["'self'", (_req, res) => `'nonce-${res.locals.cspNonce}'`],
         styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", "data:", "https://storage.googleapis.com", assetOrigin].filter(Boolean),
+        imgSrc: ["'self'", "data:", assetOrigin].filter(Boolean),
         connectSrc: ["'self'"],
         objectSrc: ["'none'"],
         baseUri: ["'self'"],

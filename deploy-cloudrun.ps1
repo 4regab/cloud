@@ -77,7 +77,7 @@ if (-not $GeminiApiKey) {
   throw "Gemini API key is required. Pass -GeminiApiKey or set GEMINI_API_KEY."
 }
 
-$AssetBaseUrl = "https://storage.googleapis.com/$BucketName"
+$AssetBaseUrl = "/assets"
 $Image = "$Region-docker.pkg.dev/$ProjectId/$ArtifactRepo/$ServiceName"
 $TempSecretFile = Join-Path $PSScriptRoot ".gemini-key.tmp"
 
@@ -125,16 +125,6 @@ if (-not (Command-Succeeds @("gcloud", "storage", "buckets", "describe", "gs://$
 } else {
   Write-Host "Cloud Storage bucket exists: gs://$BucketName" -ForegroundColor DarkGray
 }
-
-Run "Allow public reads for portfolio media assets" @(
-  "gcloud",
-  "storage",
-  "buckets",
-  "add-iam-policy-binding",
-  "gs://$BucketName",
-  "--member=allUsers",
-  "--role=roles/storage.objectViewer"
-)
 
 if (-not $SkipAssetUpload) {
   Run "Upload media assets to Cloud Storage" @(
@@ -231,4 +221,4 @@ $ServiceUrl = (& gcloud run services describe $ServiceName --region $Region --fo
 Write-Host ""
 Write-Host "Deploy complete." -ForegroundColor Green
 Write-Host "Service URL: $ServiceUrl"
-Write-Host "Asset URL:   $AssetBaseUrl"
+Write-Host "Asset URL:   $AssetBaseUrl (served by Cloud Run domain)"
