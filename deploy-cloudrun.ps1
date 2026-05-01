@@ -9,6 +9,12 @@ param(
   [string]$GeminiModel = "gemini-2.5-flash",
   [string]$SecretName = "gemini-api-key",
   [string]$GeminiApiKey = "",
+  [int]$GlobalRateLimit = 500,
+  [int]$GlobalRateLimitWindowMs = 900000,
+  [int]$ChatRateLimit = 10,
+  [int]$ChatRateLimitWindowMs = 60000,
+  [int]$ChatMaxMessages = 8,
+  [int]$ChatMaxMessageLength = 800,
   [switch]$SkipAssetUpload
 )
 
@@ -215,7 +221,7 @@ Run "Deploy Cloud Run service" @(
   $Region,
   "--allow-unauthenticated",
   "--set-env-vars",
-  "ASSET_BASE_URL=$AssetBaseUrl,GEMINI_MODEL=$GeminiModel",
+  "ASSET_BASE_URL=$AssetBaseUrl,GEMINI_MODEL=$GeminiModel,GLOBAL_RATE_LIMIT=$GlobalRateLimit,GLOBAL_RATE_LIMIT_WINDOW_MS=$GlobalRateLimitWindowMs,CHAT_RATE_LIMIT=$ChatRateLimit,CHAT_RATE_LIMIT_WINDOW_MS=$ChatRateLimitWindowMs,CHAT_MAX_MESSAGES=$ChatMaxMessages,CHAT_MAX_MESSAGE_LENGTH=$ChatMaxMessageLength",
   "--set-secrets",
   "GEMINI_API_KEY=$SecretName`:latest"
 )

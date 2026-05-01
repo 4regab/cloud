@@ -1,8 +1,176 @@
 # Bryl Lim Portfolio on Cloud Run
 
-Plain HTML/CSS/JavaScript portfolio served by Cloud Run, with media assets intended for a public Cloud Storage bucket and a Gemini-backed chat endpoint.
+Plain HTML/CSS/JavaScript portfolio served by Cloud Run, with public media assets in Cloud Storage and a Gemini-backed chatbot endpoint.
 
-## Local Run
+## Architecture
+
+- **Cloud Run** serves the portfolio and owns `/api/chat`.
+- **Cloud Storage** stores public media assets from `public/assets`.
+- **Secret Manager** stores `GEMINI_API_KEY`.
+- **Cloud Build** builds and pushes the container image to Artifact Registry.
+- **Gemini API** answers chat requests from the server only. The browser never receives the API key.
+
+## Deploy From Google Cloud Console
+
+Use this path when deploying from the GCP Console browser UI.
+
+### 1. Prepare Your GCP Project
+
+In [Google Cloud Console](https://console.cloud.google.com/):
+
+1. Select or create a project.
+2. Make sure billing is enabled.
+3. Open **Cloud Shell** from the top-right terminal icon.
+4. Confirm the active project:
+
+```bash
+gcloud config get-value project
+```
+
+If it is not the right project:
+
+```bash
+gcloud config set project "your-project-id"
+```
+
+### 2. Put The Code In Cloud Shell
+
+Cloud Shell needs a copy of this project before it can deploy.
+
+If the project is in GitHub:
+
+```bash
+git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git
+cd YOUR_REPO
+```
+
+If you have a ZIP file instead:
+
+1. In Cloud Shell, click **More** > **Upload**.
+2. Upload the ZIP.
+3. Run:
+
+```bash
+unzip portfolio.zip
+cd portfolio
+```
+
+The folder should contain `Dockerfile`, `server.js`, `package.json`, `public/`, and `deploy-cloudshell.sh`.
+
+### 3. Deploy With One Command
+
+Interactive form, safest for manual use:
+
+```bash
+chmod +x ./deploy-cloudshell.sh && ./deploy-cloudshell.sh --project "your-project-id"
+```
+
+The script will prompt for your Gemini API key without printing it to the terminal.
+
+Non-interactive form:
+
+```bash
+export GEMINI_API_KEY="your-gemini-api-key"
+chmod +x ./deploy-cloudshell.sh && ./deploy-cloudshell.sh --project "your-project-id"
+```
+
+Optional custom settings:
+
+```bash
+export GEMINI_API_KEY="your-gemini-api-key"
+export CHAT_RATE_LIMIT="10"
+export GLOBAL_RATE_LIMIT="500"
+
+chmod +x ./deploy-cloudshell.sh && ./deploy-cloudshell.sh \
+  --project "your-project-id" \
+  --region "asia-southeast1" \
+  --service "bryllim-site" \
+  --bucket "your-project-id-bryllim-assets"
+```
+
+### 4. What The Script Creates
+
+The Cloud Shell deploy script creates or reuses:
+
+- required APIs: Cloud Run, Cloud Build, Artifact Registry, Secret Manager, Cloud Storage
+- Artifact Registry Docker repository: `bryllim`
+- Cloud Storage bucket: `<project-id>-bryllim-assets`
+- Secret Manager secret: `gemini-api-key`
+- Cloud Run service: `bryllim-site`
+
+It also:
+
+- uploads `public/assets` to Cloud Storage
+- makes the media bucket publicly readable
+- sets long-lived cache headers on media assets
+- builds the container with Cloud Build
+- deploys Cloud Run with unauthenticated public access
+- injects `GEMINI_API_KEY` into Cloud Run from Secret Manager
+- configures default rate limits for the chat endpoint
+
+### 5. Verify Deployment
+
+At the end, the script prints:
+
+```text
+Service URL: https://...
+Asset URL:   https://storage.googleapis.com/...
+```
+
+Open the **Service URL** and verify:
+
+- the portfolio loads
+- profile and gallery images load
+- theme toggle works
+- gallery controls work
+- chat opens
+- chat replies when a valid Gemini key is configured
+
+You can also check from Cloud Shell:
+
+```bash
+curl "$(gcloud run services describe bryllim-site --region asia-southeast1 --format='value(status.url)')/healthz"
+```
+
+Expected response:
+
+```json
+{"ok":true}
+```
+
+## Updating The Site
+
+After changing files, redeploy from Cloud Shell:
+
+```bash
+./deploy-cloudshell.sh --project "your-project-id"
+```
+
+The script is idempotent. It reuses existing GCP resources, uploads the latest assets, creates a new Gemini secret version if `GEMINI_API_KEY` is provided, rebuilds the image, and deploys a new Cloud Run revision.
+
+To skip re-uploading assets:
+
+```bash
+./deploy-cloudshell.sh --project "your-project-id" --skip-assets
+```
+
+## Configuration
+
+Runtime environment variables:
+
+- `GEMINI_API_KEY`: Gemini API key. Set through Secret Manager by the deploy script.
+- `GEMINI_MODEL`: Gemini model. Defaults to `gemini-2.5-flash`.
+- `ASSET_BASE_URL`: public Cloud Storage asset URL. Defaults to `/assets` locally.
+- `GLOBAL_RATE_LIMIT`: requests per visitor window across the site. Defaults to `500`.
+- `GLOBAL_RATE_LIMIT_WINDOW_MS`: global limiter window. Defaults to `900000`.
+- `CHAT_RATE_LIMIT`: chat messages per visitor window. Defaults to `10`.
+- `CHAT_RATE_LIMIT_WINDOW_MS`: chat limiter window. Defaults to `60000`.
+- `CHAT_MAX_MESSAGES`: max recent chat messages forwarded to Gemini. Defaults to `8`.
+- `CHAT_MAX_MESSAGE_LENGTH`: max characters per chat message. Defaults to `800`.
+- `ALLOWED_CHAT_ORIGINS`: optional comma-separated list of allowed browser origins for `/api/chat`; same-origin is allowed automatically.
+- `PORT`: supplied automatically by Cloud Run. Defaults to `8080` locally.
+
+## Local Development
 
 ```powershell
 npm install
@@ -14,113 +182,19 @@ Open `http://localhost:8080`.
 
 Without `GEMINI_API_KEY`, the portfolio still works and `/api/chat` returns a setup message.
 
-## Configuration
+## Security Notes
 
-Environment variables:
+- Gemini API keys are stored in Secret Manager and injected into Cloud Run only at runtime.
+- `/api/chat` is protected by same-origin checks, JSON body size limits, global rate limiting, and chat-specific rate limiting.
+- Rate limiting is in Cloud Run instance memory. For stronger multi-instance abuse protection, add Cloud Armor, reCAPTCHA/Turnstile, or a shared Redis-backed limiter.
+- Cloud Storage is public only for media assets. Do not upload private files or secrets to the asset bucket.
+- For stricter production IAM, replace the default Cloud Run runtime service account with a dedicated service account that can access only the Gemini secret.
 
-- `GEMINI_API_KEY`: Gemini API key used only by the Cloud Run server.
-- `GEMINI_MODEL`: optional model override. Defaults to `gemini-2.5-flash`.
-- `ASSET_BASE_URL`: public base URL for Cloud Storage assets. Defaults to `/assets` for local development.
-- `PORT`: Cloud Run supplies this automatically. Defaults to `8080`.
+## Local Windows Deployment
 
-## Cloud Storage Assets
-
-Replace `PROJECT_ID` with your Google Cloud project ID.
-
-```powershell
-$PROJECT_ID="your-project-id"
-$BUCKET="$PROJECT_ID-bryllim-assets"
-
-gcloud storage buckets create "gs://$BUCKET" --location=asia-southeast1 --uniform-bucket-level-access
-gcloud storage cp --recursive public/assets/* "gs://$BUCKET"
-gcloud storage objects update "gs://$BUCKET/**" --cache-control="public,max-age=31536000,immutable"
-gcloud storage buckets add-iam-policy-binding "gs://$BUCKET" --member="allUsers" --role="roles/storage.objectViewer"
-```
-
-The public asset base URL will be:
-
-```text
-https://storage.googleapis.com/PROJECT_ID-bryllim-assets
-```
-
-## Cloud Run Deploy
-
-### Google Cloud Console / Cloud Shell
-
-Open Cloud Shell from the Google Cloud Console, go to this project folder, then run:
-
-```bash
-chmod +x ./deploy-cloudshell.sh
-./deploy-cloudshell.sh --project "your-project-id"
-```
-
-The script prompts for the Gemini API key if `GEMINI_API_KEY` is not already set. It enables required APIs, creates/reuses the Artifact Registry repo, creates/reuses the asset bucket, uploads `public/assets`, creates/reuses the Secret Manager secret, builds the container with Cloud Build, and deploys Cloud Run.
-
-Non-interactive Cloud Shell form:
-
-```bash
-export GEMINI_API_KEY="your-gemini-api-key"
-./deploy-cloudshell.sh --project "your-project-id"
-```
-
-Optional flags:
-
-```bash
-./deploy-cloudshell.sh \
-  --project "your-project-id" \
-  --region "asia-southeast1" \
-  --service "bryllim-site" \
-  --bucket "your-project-id-bryllim-assets"
-```
-
-### Local PowerShell
-
-```powershell
-.\deploy-cloudrun.ps1 -ProjectId "your-project-id"
-```
-
-The PowerShell script is for local Windows deployment, not Google Cloud Console.
-
-Optional non-interactive form:
+This is optional. Prefer Cloud Shell for GCP Console deployment.
 
 ```powershell
 $env:GEMINI_API_KEY="your-gemini-api-key"
-.\deploy-cloudrun.ps1 -ProjectId "your-project-id" -Region "asia-southeast1" -ServiceName "bryllim-site"
+.\deploy-cloudrun.ps1 -ProjectId "your-project-id"
 ```
-
-Manual deploy commands are below for troubleshooting or custom pipelines.
-
-```powershell
-$PROJECT_ID="your-project-id"
-$REGION="asia-southeast1"
-$SERVICE="bryllim-site"
-$REPO="bryllim"
-$BUCKET="$PROJECT_ID-bryllim-assets"
-$ASSET_BASE_URL="https://storage.googleapis.com/$BUCKET"
-$IMAGE="$REGION-docker.pkg.dev/$PROJECT_ID/$REPO/$SERVICE"
-
-gcloud config set project $PROJECT_ID
-gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com
-gcloud artifacts repositories create $REPO --repository-format=docker --location $REGION
-gcloud builds submit --tag $IMAGE
-gcloud run deploy $SERVICE `
-  --image $IMAGE `
-  --region $REGION `
-  --allow-unauthenticated `
-  --set-env-vars "ASSET_BASE_URL=$ASSET_BASE_URL,GEMINI_MODEL=gemini-2.5-flash" `
-  --set-secrets "GEMINI_API_KEY=gemini-api-key:latest"
-```
-
-Create the `gemini-api-key` secret first:
-
-```powershell
-$env:GEMINI_KEY="your-gemini-api-key"
-Set-Content -Path .gemini-key.tmp -Value $env:GEMINI_KEY -NoNewline
-gcloud secrets create gemini-api-key --data-file=.gemini-key.tmp
-Remove-Item .gemini-key.tmp
-gcloud secrets add-iam-policy-binding gemini-api-key `
-  --member="serviceAccount:PROJECT_NUMBER-compute@developer.gserviceaccount.com" `
-  --role="roles/secretmanager.secretAccessor"
-```
-
-Use your project number in the service account line, or deploy with a dedicated service account and grant that account secret access.
