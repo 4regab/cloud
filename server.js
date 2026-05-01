@@ -3,6 +3,7 @@ import { rateLimit } from "express-rate-limit";
 import helmet from "helmet";
 import { GoogleGenAI } from "@google/genai";
 import { readFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,7 +13,6 @@ const publicDir = path.join(__dirname, "public");
 const app = express();
 const port = process.env.PORT || 8080;
 const assetBaseUrl = (process.env.ASSET_BASE_URL || "/assets").replace(/\/$/, "");
-const geminiModel = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 const geminiEmbeddingModel = process.env.GEMINI_EMBEDDING_MODEL || "gemini-embedding-2";
 const apiKey = process.env.GEMINI_API_KEY;
 const genAI = apiKey ? new GoogleGenAI({ apiKey }) : null;
@@ -23,32 +23,47 @@ const globalWindowMs = Number(process.env.GLOBAL_RATE_LIMIT_WINDOW_MS || 15 * 60
 const globalLimit = Number(process.env.GLOBAL_RATE_LIMIT || 500);
 const maxChatMessages = Number(process.env.CHAT_MAX_MESSAGES || 8);
 const maxChatMessageLength = Number(process.env.CHAT_MAX_MESSAGE_LENGTH || 800);
+const minAnswerScore = Number(process.env.CHAT_MIN_ANSWER_SCORE || 0.16);
 const allowedChatOrigins = (process.env.ALLOWED_CHAT_ORIGINS || "")
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
-
-const portfolioFacts = [
-  "Bryl Lim is based in Metro Manila, Philippines.",
-  "Bryl Lim works as an AI engineer, software engineer, and content creator.",
-  "Bryl specializes in JavaScript, TypeScript, React, Next.js, Vue.js, Tailwind CSS, Node.js, Python, PHP, Laravel, PostgreSQL, MongoDB, AWS, Docker, Kubernetes, and GitHub Actions.",
-  "Bryl builds modern web applications, mobile apps, SEO and digital marketing solutions, AI-powered products, and developer tutorials.",
-  "Bryl has helped startups and MSMEs grow and streamline processes through software solutions.",
-  "Bryl has built a developer community of over 200,000 developers through knowledge sharing and mentorship.",
-  "Bryl's recent projects include CodeCred, BASE404, DIIN.PH, and DYNAMIS Workout Tracker.",
-  "Bryl was recognized as DICT OpenGov Hackathon 2025 Champion.",
-  "Bryl is available for software development, AI engineering, consulting, mentorship, and speaking engagements.",
-  "Visitors can book Bryl through https://calendly.com/bryllim/consultation or email bryllim@gmail.com."
-];
+let knowledgeCache;
+const keywordStopwords = new Set([
+  "the",
+  "and",
+  "for",
+  "with",
+  "what",
+  "who",
+  "how",
+  "does",
+  "have",
+  "has",
+  "his",
+  "her",
+  "bryl",
+  "lim",
+  "about",
+  "tell",
+  "show",
+  "give",
+  "you",
+  "your"
+]);
 
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
+app.use((_req, res, next) => {
+  res.locals.cspNonce = randomBytes(16).toString("base64");
+  next();
+});
 app.use(
   helmet({
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'"],
+        scriptSrc: ["'self'", (_req, res) => `'nonce-${res.locals.cspNonce}'`],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", "data:", "https://storage.googleapis.com", assetOrigin].filter(Boolean),
         connectSrc: ["'self'"],
@@ -129,6 +144,7 @@ const chatLimiter = rateLimit({
 
 function getEmbeddingValues(embedding) {
   if (!embedding) return [];
+  if (Array.isArray(embedding.embedding?.values)) return embedding.embedding.values;
   if (Array.isArray(embedding.values)) return embedding.values;
   if (Array.isArray(embedding.value)) return embedding.value;
   if (Array.isArray(embedding)) return embedding;
@@ -151,37 +167,147 @@ function cosineSimilarity(a, b) {
   return dot / (Math.sqrt(aMagnitude) * Math.sqrt(bMagnitude));
 }
 
-async function getRelevantPortfolioContext(query) {
-  if (!genAI || !query) {
-    return portfolioFacts.join("\n");
+function splitMarkdownKnowledge(markdown) {
+  return markdown
+    .split(/\n(?=## )/g)
+    .map((section) => section.trim())
+    .filter((section) => section.startsWith("## "))
+    .map((section) => {
+      const [headingLine, ...bodyLines] = section.split("\n");
+      return {
+        title: headingLine.replace(/^##\s*/, "").trim(),
+        text: bodyLines.join("\n").trim().replace(/\n{2,}/g, "\n")
+      };
+    })
+    .filter((section) => section.text.length > 0);
+}
+
+function keywordScore(query, section) {
+  const queryTerms = new Set(
+    query
+      .toLowerCase()
+      .replace(/[^a-z0-9\s.]/g, " ")
+      .split(/\s+/)
+      .filter((term) => term.length > 2 && !keywordStopwords.has(term))
+  );
+
+  if (queryTerms.size === 0) return 0;
+
+  const normalizedTitle = section.title.toLowerCase();
+  const normalizedText = `${section.title}\n${section.text}`.toLowerCase();
+  let score = 0;
+  queryTerms.forEach((term) => {
+    if (normalizedTitle.includes(term)) score += 2;
+    else if (normalizedText.includes(term)) score += 1;
+  });
+
+  return score / queryTerms.size;
+}
+
+function formatAnswer(matches, usedFallback = false) {
+  if (matches.length === 0) {
+    return "I don't have that information in Bryl's portfolio notes yet. You can email Bryl at bryllim@gmail.com or schedule a consultation at https://calendly.com/bryllim/consultation.";
   }
+
+  const answer = matches
+    .map((match) => {
+      const lines = match.text
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .slice(0, 5);
+      return `${match.title}\n${lines.join("\n")}`;
+    })
+    .join("\n\n");
+
+  if (!usedFallback) return answer;
+
+  return `${answer}\n\nI matched this from Bryl's portfolio notes without generating new content.`;
+}
+
+async function getKnowledgeBase() {
+  if (knowledgeCache) return knowledgeCache;
+
+  const markdown = await readFile(path.join(__dirname, "content", "portfolio.md"), "utf8");
+  const sections = splitMarkdownKnowledge(markdown);
+
+  knowledgeCache = { sections, embedded: false };
+
+  if (!genAI) return knowledgeCache;
 
   try {
     const response = await genAI.models.embedContent({
       model: geminiEmbeddingModel,
-      contents: [query, ...portfolioFacts]
+      contents: sections.map((section) => `${section.title}\n${section.text}`)
     });
 
     const embeddings = response.embeddings || [];
-    const queryVector = getEmbeddingValues(embeddings[0]);
-
-    if (!queryVector.length) {
-      return portfolioFacts.join("\n");
-    }
-
-    return portfolioFacts
-      .map((fact, index) => ({
-        fact,
-        score: cosineSimilarity(queryVector, getEmbeddingValues(embeddings[index + 1]))
-      }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 5)
-      .map((item) => item.fact)
-      .join("\n");
+    knowledgeCache.sections = sections.map((section, index) => ({
+      ...section,
+      vector: getEmbeddingValues(embeddings[index])
+    }));
+    knowledgeCache.embedded = knowledgeCache.sections.some((section) => section.vector?.length);
   } catch (error) {
-    console.warn("Gemini embedding failed; falling back to full portfolio context", error);
-    return portfolioFacts.join("\n");
+    console.warn("Gemini knowledge embedding failed; keyword fallback will be used", error);
   }
+
+  return knowledgeCache;
+}
+
+async function searchKnowledge(query) {
+  const knowledgeBase = await getKnowledgeBase();
+
+  if (!genAI || !query || !knowledgeBase.embedded) {
+    return {
+      usedFallback: true,
+      matches: knowledgeBase.sections
+        .map((section) => ({
+          ...section,
+          score: keywordScore(query, section)
+        }))
+        .filter((section) => section.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 2)
+    };
+  }
+
+  let queryVector = [];
+  try {
+    const response = await genAI.models.embedContent({
+      model: geminiEmbeddingModel,
+      contents: [query]
+    });
+    queryVector = getEmbeddingValues(response.embeddings?.[0]);
+  } catch (error) {
+    console.warn("Gemini query embedding failed; keyword fallback will be used", error);
+  }
+
+  if (!queryVector.length) {
+    return {
+      usedFallback: true,
+      matches: knowledgeBase.sections
+        .map((section) => ({
+          ...section,
+          score: keywordScore(query, section)
+        }))
+        .filter((section) => section.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 2)
+    };
+  }
+
+  const matches = knowledgeBase.sections
+    .map((section) => ({
+      ...section,
+      score: cosineSimilarity(queryVector, section.vector || [])
+    }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 2);
+
+  return {
+    usedFallback: false,
+    matches: matches[0]?.score >= minAnswerScore ? matches : []
+  };
 }
 
 app.post("/api/chat", requireAllowedChatOrigin, chatLimiter, async (req, res) => {
@@ -206,27 +332,13 @@ app.post("/api/chat", requireAllowedChatOrigin, chatLimiter, async (req, res) =>
     return;
   }
 
-  const transcript = cleanMessages
-    .map((message) => `${message.role === "assistant" ? "Assistant" : "Visitor"}: ${message.text}`)
-    .join("\n");
   const latestUserMessage = [...cleanMessages].reverse().find((message) => message.role === "user")?.text || "";
-  const relevantContext = await getRelevantPortfolioContext(latestUserMessage);
 
   try {
-    const response = await genAI.models.generateContent({
-      model: geminiModel,
-      contents: transcript,
-      config: {
-        temperature: 0.6,
-        maxOutputTokens: 420,
-        systemInstruction:
-          `You are Bryl Lim's portfolio assistant. Answer briefly and helpfully using only the portfolio facts below. If the answer is not covered, say you do not have that information and suggest emailing bryllim@gmail.com. Do not invent unavailable private information.\n\nRelevant portfolio facts:\n${relevantContext}`
-      }
-    });
-
-    res.json({ reply: response.text || "I could not generate a response right now." });
+    const result = await searchKnowledge(latestUserMessage);
+    res.json({ reply: formatAnswer(result.matches, result.usedFallback) });
   } catch (error) {
-    console.error("Gemini chat error", error);
+    console.error("Gemini embedding chat error", error);
     res.status(500).json({ error: "Chat failed. Please try again." });
   }
 });
@@ -234,7 +346,13 @@ app.post("/api/chat", requireAllowedChatOrigin, chatLimiter, async (req, res) =>
 app.get("/", async (_req, res, next) => {
   try {
     const html = await readFile(path.join(publicDir, "index.html"), "utf8");
-    res.type("html").send(html.replaceAll("__ASSET_BASE_URL__", assetBaseUrl));
+    res
+      .type("html")
+      .send(
+        html
+          .replaceAll("__ASSET_BASE_URL__", assetBaseUrl)
+          .replaceAll("__CSP_NONCE__", res.locals.cspNonce)
+      );
   } catch (error) {
     next(error);
   }

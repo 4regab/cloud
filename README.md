@@ -1,6 +1,6 @@
 # Bryl Lim Portfolio on Cloud Run
 
-Plain HTML/CSS/JavaScript portfolio served by Cloud Run, with public media assets in Cloud Storage and a Gemini-backed chatbot endpoint.
+Plain HTML/CSS/JavaScript portfolio served by Cloud Run, with public media assets in Cloud Storage and an embedding-based chatbot endpoint.
 
 ## Architecture
 
@@ -8,7 +8,8 @@ Plain HTML/CSS/JavaScript portfolio served by Cloud Run, with public media asset
 - **Cloud Storage** stores public media assets from `public/assets`.
 - **Secret Manager** stores `GEMINI_API_KEY`.
 - **Cloud Build** builds and pushes the container image to Artifact Registry.
-- **Gemini API** embeds the visitor question for context selection, then generates the chat response from the server only. The browser never receives the API key.
+- **Gemini API** embeds the visitor question and the Markdown knowledge base for semantic matching. The bot returns matched Markdown context without using a generative LLM.
+- **Markdown knowledge base** lives at `content/portfolio.md`.
 
 ## Deploy From Google Cloud Console
 
@@ -55,7 +56,7 @@ unzip portfolio.zip
 cd portfolio
 ```
 
-The folder should contain `Dockerfile`, `server.js`, `package.json`, `public/`, and `deploy-cloudshell.sh`.
+The folder should contain `Dockerfile`, `server.js`, `package.json`, `public/`, `content/`, and `deploy-cloudshell.sh`.
 
 ### 3. Deploy With One Command
 
@@ -81,6 +82,7 @@ export GEMINI_API_KEY="your-gemini-api-key"
 export GEMINI_EMBEDDING_MODEL="gemini-embedding-2"
 export CHAT_RATE_LIMIT="10"
 export GLOBAL_RATE_LIMIT="500"
+export CHAT_MIN_ANSWER_SCORE="0.16"
 
 chmod +x ./deploy-cloudshell.sh && ./deploy-cloudshell.sh \
   --project "your-project-id" \
@@ -125,8 +127,8 @@ Open the **Service URL** and verify:
 - theme toggle works
 - gallery controls work
 - chat opens
-- chat replies when a valid Gemini key is configured
-- chatbot uses `GEMINI_EMBEDDING_MODEL` for relevant portfolio context selection before generating the answer
+- chat replies from matched sections in `content/portfolio.md` when a valid Gemini key is configured
+- chatbot uses `GEMINI_EMBEDDING_MODEL` for semantic matching only; it does not call a generative LLM
 
 You can also check from Cloud Shell:
 
@@ -161,8 +163,7 @@ To skip re-uploading assets:
 Runtime environment variables:
 
 - `GEMINI_API_KEY`: Gemini API key. Set through Secret Manager by the deploy script.
-- `GEMINI_MODEL`: Gemini model. Defaults to `gemini-2.5-flash`.
-- `GEMINI_EMBEDDING_MODEL`: embedding model used to select relevant portfolio context before chat generation. Defaults to `gemini-embedding-2`.
+- `GEMINI_EMBEDDING_MODEL`: embedding model used to select relevant portfolio context. Defaults to `gemini-embedding-2`.
 - `ASSET_BASE_URL`: public Cloud Storage asset URL. Defaults to `/assets` locally.
 - `GLOBAL_RATE_LIMIT`: requests per visitor window across the site. Defaults to `500`.
 - `GLOBAL_RATE_LIMIT_WINDOW_MS`: global limiter window. Defaults to `900000`.
@@ -170,6 +171,7 @@ Runtime environment variables:
 - `CHAT_RATE_LIMIT_WINDOW_MS`: chat limiter window. Defaults to `60000`.
 - `CHAT_MAX_MESSAGES`: max recent chat messages forwarded to Gemini. Defaults to `8`.
 - `CHAT_MAX_MESSAGE_LENGTH`: max characters per chat message. Defaults to `800`.
+- `CHAT_MIN_ANSWER_SCORE`: minimum embedding similarity needed before returning a matched answer. Defaults to `0.16`.
 - `ALLOWED_CHAT_ORIGINS`: optional comma-separated list of allowed browser origins for `/api/chat`; same-origin is allowed automatically.
 - `PORT`: supplied automatically by Cloud Run. Defaults to `8080` locally.
 
@@ -188,11 +190,42 @@ Without `GEMINI_API_KEY`, the portfolio still works and `/api/chat` returns a se
 ## Security Notes
 
 - Gemini API keys are stored in Secret Manager and injected into Cloud Run only at runtime.
-- `gemini-embedding-2` is used for embeddings/context selection. A generative Gemini model is still required for final chatbot replies.
+- `gemini-embedding-2` is used for semantic matching. No generative Gemini model is used for chatbot replies.
 - `/api/chat` is protected by same-origin checks, JSON body size limits, global rate limiting, and chat-specific rate limiting.
 - Rate limiting is in Cloud Run instance memory. For stronger multi-instance abuse protection, add Cloud Armor, reCAPTCHA/Turnstile, or a shared Redis-backed limiter.
 - Cloud Storage is public only for media assets. Do not upload private files or secrets to the asset bucket.
 - For stricter production IAM, replace the default Cloud Run runtime service account with a dedicated service account that can access only the Gemini secret.
+
+## Troubleshooting
+
+### Browser Console: Content Security Policy blocks inline script
+
+The app uses a strict CSP with per-request nonces. If you see this after deployment, redeploy the latest code so Cloud Run serves `index.html` through `server.js`; opening `public/index.html` directly or serving it from a plain static host will leave the `__CSP_NONCE__` placeholder unresolved.
+
+### Chat returns `500`
+
+Check Cloud Run logs first:
+
+```bash
+gcloud run services logs read bryllim-site --region asia-southeast1 --limit 50
+```
+
+Common causes:
+
+- `GEMINI_API_KEY` is missing, invalid, or has no Gemini API access.
+- `content/portfolio.md` is missing from the deployed container.
+- The selected embedding model is unavailable for the API key/project.
+- Gemini quota or rate limits were exceeded.
+
+### Update chatbot knowledge
+
+Edit `content/portfolio.md`, then redeploy:
+
+```bash
+./deploy-cloudshell.sh --project "your-project-id"
+```
+
+The chatbot does not invent answers. It returns the best matching sections from this Markdown file or a contact fallback when there is no good match.
 
 ## Local Windows Deployment
 

@@ -6,7 +6,6 @@ param(
   [string]$ServiceName = "bryllim-site",
   [string]$BucketName = "",
   [string]$ArtifactRepo = "bryllim",
-  [string]$GeminiModel = "gemini-2.5-flash",
   [string]$GeminiEmbeddingModel = "gemini-embedding-2",
   [string]$SecretName = "gemini-api-key",
   [string]$GeminiApiKey = "",
@@ -16,6 +15,7 @@ param(
   [int]$ChatRateLimitWindowMs = 60000,
   [int]$ChatMaxMessages = 8,
   [int]$ChatMaxMessageLength = 800,
+  [double]$ChatMinAnswerScore = 0.16,
   [switch]$SkipAssetUpload
 )
 
@@ -222,7 +222,7 @@ Run "Deploy Cloud Run service" @(
   $Region,
   "--allow-unauthenticated",
   "--set-env-vars",
-  "ASSET_BASE_URL=$AssetBaseUrl,GEMINI_MODEL=$GeminiModel,GEMINI_EMBEDDING_MODEL=$GeminiEmbeddingModel,GLOBAL_RATE_LIMIT=$GlobalRateLimit,GLOBAL_RATE_LIMIT_WINDOW_MS=$GlobalRateLimitWindowMs,CHAT_RATE_LIMIT=$ChatRateLimit,CHAT_RATE_LIMIT_WINDOW_MS=$ChatRateLimitWindowMs,CHAT_MAX_MESSAGES=$ChatMaxMessages,CHAT_MAX_MESSAGE_LENGTH=$ChatMaxMessageLength",
+  "ASSET_BASE_URL=$AssetBaseUrl,GEMINI_EMBEDDING_MODEL=$GeminiEmbeddingModel,GLOBAL_RATE_LIMIT=$GlobalRateLimit,GLOBAL_RATE_LIMIT_WINDOW_MS=$GlobalRateLimitWindowMs,CHAT_RATE_LIMIT=$ChatRateLimit,CHAT_RATE_LIMIT_WINDOW_MS=$ChatRateLimitWindowMs,CHAT_MAX_MESSAGES=$ChatMaxMessages,CHAT_MAX_MESSAGE_LENGTH=$ChatMaxMessageLength,CHAT_MIN_ANSWER_SCORE=$ChatMinAnswerScore",
   "--set-secrets",
   "GEMINI_API_KEY=$SecretName`:latest"
 )
