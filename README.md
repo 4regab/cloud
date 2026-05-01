@@ -1,6 +1,6 @@
-# Bryl Lim Portfolio on Cloud Run
+# Portfolio Template on Cloud Run
 
-Plain HTML/CSS/JavaScript portfolio served by Cloud Run, with private media assets stored in Cloud Storage and served through the Cloud Run domain, plus a Gemini 2.5 Flash-Lite chatbot endpoint.
+Plain HTML/CSS/JavaScript portfolio template served by Cloud Run, with private media assets stored in Cloud Storage and served through the Cloud Run domain, plus a Gemini 2.5 Flash-Lite chatbot endpoint.
 
 ## Architecture
 
@@ -8,42 +8,32 @@ Plain HTML/CSS/JavaScript portfolio served by Cloud Run, with private media asse
 - **Cloud Storage** stores the media assets privately; Cloud CDN can be added in front of `/assets` later if you front the bucket with an HTTPS load balancer.
 - **Secret Manager** stores `GEMINI_API_KEY`.
 - **Cloud Build** builds and pushes the container image to Artifact Registry.
-- **Gemini API** uses `gemma-4` to answer from the Markdown knowledge base.
+- **Gemini API** uses `gemini-2.5-flash-lite` to answer from the Markdown knowledge base.
 - **Markdown knowledge base** lives at `public/context.md`.
 
-## Deploy From Google Cloud Console
+## GCP Deployment Guide
 
-Use this path when deploying from the GCP Console browser UI.
+This is the recommended Cloud Shell workflow.
 
-Deployment has two parts:
+### 1. Prepare the GCP project
 
-1. **Clone or upload the repo into Cloud Shell.** This gives Cloud Shell the source code.
-2. **Run the deploy script.** This configures Google Cloud resources and deploys Cloud Run.
-
-Cloning the repo alone does not create Cloud Run, Cloud Storage, Secret Manager, or Gemini configuration.
-
-### 1. Prepare Your GCP Project
-
-In [Google Cloud Console](https://console.cloud.google.com/):
-
-1. Select or create a project.
-2. Make sure billing is enabled.
-3. Open **Cloud Shell** from the top-right terminal icon.
-4. Confirm the active project:
+1. Open [Google Cloud Console](https://console.cloud.google.com/).
+2. Select or create a project.
+3. Enable billing.
+4. Open **Cloud Shell**.
+5. Check the active project:
 
 ```bash
 gcloud config get-value project
 ```
 
-If it is not the right project:
+6. If needed, switch to the right project:
 
 ```bash
 gcloud config set project "your-project-id"
 ```
 
-### 2. Clone The Repo In Cloud Shell
-
-Cloud Shell needs a copy of this project before it can deploy.
+### 2. Get the source code into Cloud Shell
 
 Recommended GitHub flow:
 
@@ -51,8 +41,6 @@ Recommended GitHub flow:
 git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git
 cd YOUR_REPO
 ```
-
-If you fork this portfolio, replace `YOUR_USERNAME/YOUR_REPO` with your fork URL.
 
 Alternative ZIP upload flow:
 
@@ -65,34 +53,34 @@ unzip portfolio.zip
 cd portfolio
 ```
 
-The folder should contain `Dockerfile`, `server.js`, `package.json`, `public/`, and `deploy-cloudshell.sh`.
+The repo should contain `Dockerfile`, `server.js`, `package.json`, `public/`, and `deploy-cloudshell.sh`.
 
-### 3. Configure The Portfolio Before Deploying
+### 3. Edit the template content
 
-Before running the Cloud Run deploy, edit the repo files for your own portfolio:
+Before deploying, customize these files:
 
-- `public/context.md`: chatbot knowledge base. The bot only answers from this file.
-- `public/index.html`: visible portfolio content and links.
-- `public/assets`: profile image, gallery images, favicons, and other public media. Portfolio/gallery images should be WebP; favicon files can stay PNG/ICO.
-- `public/styles.css`: visual styling.
+- `public/index.html`: visible page content
+- `public/context.md`: chat knowledge base
+- `public/assets`: profile image, gallery images, favicon files, and other public media
+- `public/styles.css`: visual styling
 
-In Cloud Shell, you can use the built-in editor:
+Open the editor in Cloud Shell with:
 
 ```bash
 cloudshell edit public/context.md
 ```
 
-Do not put secrets in repo files. The Gemini API key is entered during deploy and stored in Secret Manager.
+Do not place secrets in repo files. The Gemini API key should be stored in Secret Manager or entered at deploy time.
 
-### 4. Configure And Deploy Cloud Run With One Command
+### 4. Deploy to Cloud Run
 
-Interactive form, safest for manual use:
+The deploy script creates or reuses the Google Cloud resources and deploys the service.
+
+Interactive form:
 
 ```bash
 chmod +x ./deploy-cloudshell.sh && ./deploy-cloudshell.sh --project "your-project-id"
 ```
-
-The script will prompt for your Gemini API key without printing it to the terminal.
 
 Non-interactive form:
 
@@ -101,11 +89,11 @@ export GEMINI_API_KEY="your-gemini-api-key"
 chmod +x ./deploy-cloudshell.sh && ./deploy-cloudshell.sh --project "your-project-id"
 ```
 
-Optional custom settings:
+With custom settings:
 
 ```bash
 export GEMINI_API_KEY="your-gemini-api-key"
-export GEMINI_MODEL="gemma-4"
+export GEMINI_MODEL="gemini-2.5-flash-lite"
 export CHAT_RATE_LIMIT="10"
 export GLOBAL_RATE_LIMIT="500"
 
@@ -116,58 +104,77 @@ chmod +x ./deploy-cloudshell.sh && ./deploy-cloudshell.sh \
   --bucket "your-project-id-bryllim-assets"
 ```
 
-This command does the Cloud Run/GCP configuration. It is not just a local build command.
+### 5. What gets created
 
-### 5. What The Script Configures In GCP
+The deploy script creates or reuses:
 
-The Cloud Shell deploy script creates or reuses:
-
-- required APIs: Cloud Run, Cloud Build, Artifact Registry, Secret Manager, Cloud Storage
-- Artifact Registry Docker repository: `bryllim`
+- Cloud Run service: `bryl`
 - Cloud Storage bucket: `<project-id>-bryllim-assets`
 - Secret Manager secret: `gemini-api-key`
-- Cloud Run service: `bryl`
+- Artifact Registry repository: `bryllim`
+- Required APIs: Cloud Run, Cloud Build, Artifact Registry, Secret Manager, Cloud Storage
 
 It also:
 
 - uploads `public/assets` to a private Cloud Storage bucket
-- serves media through Cloud Run at `/assets`
-- can be fronted by Cloud CDN later without exposing the bucket directly
-- sets long-lived cache headers on media assets in Cloud Storage
-- builds the container with Cloud Build
-- deploys Cloud Run with unauthenticated public access
-- injects `GEMINI_API_KEY` into Cloud Run from Secret Manager
-- configures default rate limits for the chat endpoint
+- serves assets through Cloud Run at `/assets`
+- sets long-lived cache headers on asset objects
+- deploys Cloud Run with public access
+- injects `GEMINI_API_KEY` from Secret Manager
 
-### 6. Verify Deployment
+### 6. Verify the deployment
 
-At the end, the script prints:
+The script prints:
 
 ```text
 Service URL: https://...
 Asset URL:   /assets
 ```
 
-Open the **Service URL** and verify:
-
-- the portfolio loads
-- profile and gallery images load
-- theme toggle works
-- gallery controls work
-- chat opens
-- chat replies naturally using only facts from `public/context.md` when a valid Gemini key is configured
-
-You can also check from Cloud Shell:
+Check the service:
 
 ```bash
 curl "$(gcloud run services describe bryl --region asia-southeast1 --format='value(status.url)')/healthz"
 ```
 
-Expected response:
+Expected:
 
 ```json
 {"ok":true}
 ```
+
+Open the service URL and verify the page, gallery, and chat.
+
+### 7. Update later
+
+After changes:
+
+```bash
+git pull
+./deploy-cloudshell.sh --project "your-project-id"
+```
+
+To skip media re-upload:
+
+```bash
+./deploy-cloudshell.sh --project "your-project-id" --skip-assets
+```
+
+## Add Cloud CDN for assets
+
+Use this if you want faster image delivery without exposing the bucket directly.
+
+1. Keep Cloud Run serving the HTML and `/api/chat`.
+2. Keep `public/assets` in the private Cloud Storage bucket.
+3. Create an HTTPS load balancer with a **backend bucket** pointing to that bucket.
+4. Enable **Cloud CDN** on the backend bucket.
+5. Set `ASSET_BASE_URL` to the CDN hostname, for example `https://cdn.example.com`.
+6. Redeploy so `public/index.html` and `/config.js` use the CDN URL for asset links.
+
+Notes:
+- Keep `Cache-Control` headers long-lived on asset objects.
+- Do not make the bucket public if you want the CDN to remain the only public path.
+- If you change asset URLs later, invalidate the CDN cache for the affected paths.
 
 ## Updating The Site
 
@@ -197,7 +204,7 @@ To skip re-uploading assets:
 Runtime environment variables:
 
 - `GEMINI_API_KEY`: Gemini API key. Set through Secret Manager by the deploy script.
-- `GEMINI_MODEL`: Gemini chat model. Defaults to `gemma-4`.
+- `GEMINI_MODEL`: Gemini chat model. Defaults to `gemini-2.5-flash-lite`.
 - `ASSET_BASE_URL`: asset path. Defaults to `/assets`.
 - `ASSET_BUCKET_NAME`: private Cloud Storage bucket used by Cloud Run to serve media.
 - `GLOBAL_RATE_LIMIT`: requests per visitor window across the site. Defaults to `500`.
@@ -224,7 +231,8 @@ Without `GEMINI_API_KEY`, the portfolio still works and `/api/chat` returns a se
 ## Security Notes
 
 - Gemini API keys are stored in Secret Manager and injected into Cloud Run only at runtime.
-- Chat uses `gemma-4` with `public/context.md` as strict context.
+- Chat uses `gemini-2.5-flash-lite` with `public/context.md` as strict context.
+- Chat also applies Gemini safety settings for harassment, hate speech, sexual content, and dangerous content.
 - `/api/chat` is protected by same-origin checks, JSON body size limits, global rate limiting, and chat-specific rate limiting.
 - Rate limiting is in Cloud Run instance memory. For stronger multi-instance abuse protection, add Cloud Armor, reCAPTCHA/Turnstile, or a shared Redis-backed limiter.
 - Cloud Storage is private; Cloud Run reads media from it and serves the files from the app domain.
@@ -248,7 +256,7 @@ Common causes:
 
 - `GEMINI_API_KEY` is missing, invalid, or has no Gemini API access.
 - `public/context.md` is missing from the deployed container.
-- The selected Gemini model is unavailable for the API key/project. Default is `gemma-4`.
+- The selected Gemini model is unavailable for the API key/project. Default is `gemini-2.5-flash-lite`.
 - Gemini quota or rate limits were exceeded.
 
 ### Update chatbot knowledge

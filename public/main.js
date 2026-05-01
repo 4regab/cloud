@@ -13,26 +13,20 @@ themeToggle?.addEventListener("click", () => {
   localStorage.setItem("theme", isDark ? "dark" : "light");
 });
 
-const awardToggle = document.querySelector(".award button");
-const awardDetails = document.querySelector(".award-details");
-awardToggle?.addEventListener("click", () => {
-  awardDetails.hidden = !awardDetails.hidden;
-});
-
 const recommendations = [
   {
-    text: "“Bryl was the most talented software engineer I've mentored in a long time. He's a fast learner, and he always makes sure to deliver quality output given a period of time. He is also very keen on learning new technologies, and I find him to be objectively...”",
-    name: "Cris Lawrence Adrian Militante",
-    role: "ICT Director at GCM"
+    text: "“This template is clean, flexible, and easy to customize. It gave me a solid starting point for my own portfolio.”",
+    name: "Client Name",
+    role: "Design Lead"
   },
   {
-    text: "“Sir Bryl's teaching approach is incredibly hands-on, and the projects significantly accelerated my learning process in web development. I am truly grateful for the mentorship I received from him during my web development internship.”",
-    name: "John Edmerson Pizarra",
-    role: "Jr. Full-stack Developer, PocketDevs"
+    text: "“The layout feels polished out of the box, and the content sections are easy to swap for my own story.”",
+    name: "Workshop Attendee",
+    role: "Frontend Developer"
   },
   {
-    text: "“Bryl brings a rare mix of technical depth, mentorship, and practical execution. He explains complex engineering work clearly and ships with strong attention to detail.”",
-    name: "Portfolio Visitor",
+    text: "“Great template for shipping a portfolio quickly without starting from scratch.”",
+    name: "Template User",
     role: "Recommendation"
   }
 ];
@@ -150,6 +144,6 @@ chatForm?.addEventListener("submit", async (event) => {
     pending.textContent = reply || "I could not respond right now.";
     chatMessages.push({ role: "assistant", text: pending.textContent });
   } catch {
-    pending.textContent = "Chat is unavailable right now. Please email bryllim@gmail.com.";
+    pending.textContent = "Chat is unavailable right now. Please email hello@example.com.";
   }
 });

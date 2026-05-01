@@ -14,7 +14,7 @@ const publicDir = path.join(__dirname, "public");
 const app = express();
 const port = process.env.PORT || 8080;
 const assetBaseUrl = (process.env.ASSET_BASE_URL || "/assets").replace(/\/$/, "");
-const geminiModel = process.env.GEMINI_MODEL || "gemma-4";
+const geminiModel = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
 const apiKey = process.env.GEMINI_API_KEY;
 const genAI = apiKey ? new GoogleGenAI({ apiKey }) : null;
 const assetBucketName = process.env.ASSET_BUCKET_NAME || process.env.BUCKET_NAME || "";
@@ -28,6 +28,12 @@ const allowedChatOrigins = (process.env.ALLOWED_CHAT_ORIGINS || "")
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
+const safetySettings = [
+  { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+  { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+  { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_MEDIUM_AND_ABOVE" },
+  { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_MEDIUM_AND_ABOVE" }
+];
 let knowledgeCache;
 let gcsTokenCache = {
   token: null,
@@ -284,12 +290,16 @@ app.post("/api/chat", requireAllowedChatOrigin, chatLimiter, async (req, res) =>
       config: {
         temperature: 0.2,
         maxOutputTokens: 220,
+        thinkingConfig: {
+          thinkingBudget: 0
+        },
+        safetySettings,
         systemInstruction:
-          `You are Bryl Lim's portfolio assistant. Use only the Markdown knowledge base below as context.\n\nRules:\n- Answer naturally in 1-4 short sentences.\n- If the visitor greets you, briefly say what you can answer about.\n- If the visitor is angry, confused, or sends nonsense, politely say you can answer questions about Bryl's projects, skills, experience, availability, and contact details.\n- If asked about a person, company, or topic not present in the Markdown, say you do not have that information in Bryl's portfolio notes.\n- Do not invent facts. Do not mention implementation details.\n\nMarkdown knowledge base:\n${knowledge}`
+          `You are the assistant for a portfolio template. Use only the Markdown knowledge base below as context.\n\nRules:\n- Answer naturally in 1-4 short sentences.\n- Only answer questions that are directly relevant to the template and its placeholder portfolio content.\n- If the visitor asks about anything outside the template, politely refuse and say you only answer questions about the template's portfolio, projects, skills, experience, availability, and contact details.\n- If the visitor greets you, briefly say what you can answer about.\n- Do not invent facts. Do not mention implementation details.\n\nMarkdown knowledge base:\n${knowledge}`
       }
     });
 
-    res.json({ reply: response.text || "I could not answer that from Bryl's portfolio notes." });
+    res.json({ reply: response.text || "I could not answer that from the template notes." });
   } catch (error) {
     console.error("Gemini chat error", error);
     res.status(500).json({ error: "Chat failed. Please try again." });

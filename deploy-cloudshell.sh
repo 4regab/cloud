@@ -6,7 +6,7 @@ REGION="${REGION:-asia-southeast1}"
 SERVICE_NAME="${SERVICE_NAME:-bryl}"
 BUCKET_NAME="${BUCKET_NAME:-}"
 ARTIFACT_REPO="${ARTIFACT_REPO:-bryllim}"
-GEMINI_MODEL="${GEMINI_MODEL:-gemma-4}"
+GEMINI_MODEL="${GEMINI_MODEL:-gemini-2.5-flash-lite}"
 SECRET_NAME="${SECRET_NAME:-gemini-api-key}"
 SKIP_ASSET_UPLOAD="${SKIP_ASSET_UPLOAD:-false}"
 GLOBAL_RATE_LIMIT="${GLOBAL_RATE_LIMIT:-500}"
@@ -26,7 +26,7 @@ Optional:
   --service SERVICE_NAME            Default: bryl
   --bucket BUCKET_NAME              Default: PROJECT_ID-bryllim-assets
   --repo ARTIFACT_REPO              Default: bryllim
-  --model GEMINI_MODEL              Default: gemma-4
+  --model GEMINI_MODEL              Default: gemini-2.5-flash-lite
   --secret SECRET_NAME              Default: gemini-api-key
   --skip-assets                     Skip Cloud Storage asset upload
 
@@ -135,7 +135,7 @@ if ! gcloud artifacts repositories describe "$ARTIFACT_REPO" --location "$REGION
   run "Create Artifact Registry repository" gcloud artifacts repositories create "$ARTIFACT_REPO" \
     --repository-format=docker \
     --location "$REGION" \
-    --description "Docker images for Bryl Lim portfolio"
+    --description "Docker images for the portfolio template"
 else
   echo "Artifact Registry repository exists: ${ARTIFACT_REPO}"
 fi
