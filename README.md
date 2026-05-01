@@ -8,7 +8,7 @@ Plain HTML/CSS/JavaScript portfolio served by Cloud Run, with public media asset
 - **Cloud Storage** stores public media assets from `public/assets`.
 - **Secret Manager** stores `GEMINI_API_KEY`.
 - **Cloud Build** builds and pushes the container image to Artifact Registry.
-- **Gemini API** answers chat requests from the server only. The browser never receives the API key.
+- **Gemini API** embeds the visitor question for context selection, then generates the chat response from the server only. The browser never receives the API key.
 
 ## Deploy From Google Cloud Console
 
@@ -78,6 +78,7 @@ Optional custom settings:
 
 ```bash
 export GEMINI_API_KEY="your-gemini-api-key"
+export GEMINI_EMBEDDING_MODEL="gemini-embedding-2"
 export CHAT_RATE_LIMIT="10"
 export GLOBAL_RATE_LIMIT="500"
 
@@ -125,6 +126,7 @@ Open the **Service URL** and verify:
 - gallery controls work
 - chat opens
 - chat replies when a valid Gemini key is configured
+- chatbot uses `GEMINI_EMBEDDING_MODEL` for relevant portfolio context selection before generating the answer
 
 You can also check from Cloud Shell:
 
@@ -160,6 +162,7 @@ Runtime environment variables:
 
 - `GEMINI_API_KEY`: Gemini API key. Set through Secret Manager by the deploy script.
 - `GEMINI_MODEL`: Gemini model. Defaults to `gemini-2.5-flash`.
+- `GEMINI_EMBEDDING_MODEL`: embedding model used to select relevant portfolio context before chat generation. Defaults to `gemini-embedding-2`.
 - `ASSET_BASE_URL`: public Cloud Storage asset URL. Defaults to `/assets` locally.
 - `GLOBAL_RATE_LIMIT`: requests per visitor window across the site. Defaults to `500`.
 - `GLOBAL_RATE_LIMIT_WINDOW_MS`: global limiter window. Defaults to `900000`.
@@ -185,6 +188,7 @@ Without `GEMINI_API_KEY`, the portfolio still works and `/api/chat` returns a se
 ## Security Notes
 
 - Gemini API keys are stored in Secret Manager and injected into Cloud Run only at runtime.
+- `gemini-embedding-2` is used for embeddings/context selection. A generative Gemini model is still required for final chatbot replies.
 - `/api/chat` is protected by same-origin checks, JSON body size limits, global rate limiting, and chat-specific rate limiting.
 - Rate limiting is in Cloud Run instance memory. For stronger multi-instance abuse protection, add Cloud Armor, reCAPTCHA/Turnstile, or a shared Redis-backed limiter.
 - Cloud Storage is public only for media assets. Do not upload private files or secrets to the asset bucket.

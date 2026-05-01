@@ -13,6 +13,7 @@ const app = express();
 const port = process.env.PORT || 8080;
 const assetBaseUrl = (process.env.ASSET_BASE_URL || "/assets").replace(/\/$/, "");
 const geminiModel = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const geminiEmbeddingModel = process.env.GEMINI_EMBEDDING_MODEL || "gemini-embedding-2";
 const apiKey = process.env.GEMINI_API_KEY;
 const genAI = apiKey ? new GoogleGenAI({ apiKey }) : null;
 const assetOrigin = assetBaseUrl.startsWith("http") ? new URL(assetBaseUrl).origin : null;
@@ -26,6 +27,19 @@ const allowedChatOrigins = (process.env.ALLOWED_CHAT_ORIGINS || "")
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
+
+const portfolioFacts = [
+  "Bryl Lim is based in Metro Manila, Philippines.",
+  "Bryl Lim works as an AI engineer, software engineer, and content creator.",
+  "Bryl specializes in JavaScript, TypeScript, React, Next.js, Vue.js, Tailwind CSS, Node.js, Python, PHP, Laravel, PostgreSQL, MongoDB, AWS, Docker, Kubernetes, and GitHub Actions.",
+  "Bryl builds modern web applications, mobile apps, SEO and digital marketing solutions, AI-powered products, and developer tutorials.",
+  "Bryl has helped startups and MSMEs grow and streamline processes through software solutions.",
+  "Bryl has built a developer community of over 200,000 developers through knowledge sharing and mentorship.",
+  "Bryl's recent projects include CodeCred, BASE404, DIIN.PH, and DYNAMIS Workout Tracker.",
+  "Bryl was recognized as DICT OpenGov Hackathon 2025 Champion.",
+  "Bryl is available for software development, AI engineering, consulting, mentorship, and speaking engagements.",
+  "Visitors can book Bryl through https://calendly.com/bryllim/consultation or email bryllim@gmail.com."
+];
 
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
@@ -73,6 +87,7 @@ app.get("/config.js", (_req, res) => {
     `window.BRYL_CONFIG=${JSON.stringify({
       assetBaseUrl,
       chatEnabled: Boolean(genAI),
+      embeddingModel: geminiEmbeddingModel,
       chatRateLimit: {
         limit: chatLimit,
         windowSeconds: Math.ceil(chatWindowMs / 1000)
@@ -112,6 +127,63 @@ const chatLimiter = rateLimit({
   message: { error: "Too many chat messages. Please wait a minute and try again." }
 });
 
+function getEmbeddingValues(embedding) {
+  if (!embedding) return [];
+  if (Array.isArray(embedding.values)) return embedding.values;
+  if (Array.isArray(embedding.value)) return embedding.value;
+  if (Array.isArray(embedding)) return embedding;
+  return [];
+}
+
+function cosineSimilarity(a, b) {
+  let dot = 0;
+  let aMagnitude = 0;
+  let bMagnitude = 0;
+  const length = Math.min(a.length, b.length);
+
+  for (let index = 0; index < length; index += 1) {
+    dot += a[index] * b[index];
+    aMagnitude += a[index] * a[index];
+    bMagnitude += b[index] * b[index];
+  }
+
+  if (aMagnitude === 0 || bMagnitude === 0) return 0;
+  return dot / (Math.sqrt(aMagnitude) * Math.sqrt(bMagnitude));
+}
+
+async function getRelevantPortfolioContext(query) {
+  if (!genAI || !query) {
+    return portfolioFacts.join("\n");
+  }
+
+  try {
+    const response = await genAI.models.embedContent({
+      model: geminiEmbeddingModel,
+      contents: [query, ...portfolioFacts]
+    });
+
+    const embeddings = response.embeddings || [];
+    const queryVector = getEmbeddingValues(embeddings[0]);
+
+    if (!queryVector.length) {
+      return portfolioFacts.join("\n");
+    }
+
+    return portfolioFacts
+      .map((fact, index) => ({
+        fact,
+        score: cosineSimilarity(queryVector, getEmbeddingValues(embeddings[index + 1]))
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5)
+      .map((item) => item.fact)
+      .join("\n");
+  } catch (error) {
+    console.warn("Gemini embedding failed; falling back to full portfolio context", error);
+    return portfolioFacts.join("\n");
+  }
+}
+
 app.post("/api/chat", requireAllowedChatOrigin, chatLimiter, async (req, res) => {
   if (!genAI) {
     res.status(503).json({
@@ -137,6 +209,8 @@ app.post("/api/chat", requireAllowedChatOrigin, chatLimiter, async (req, res) =>
   const transcript = cleanMessages
     .map((message) => `${message.role === "assistant" ? "Assistant" : "Visitor"}: ${message.text}`)
     .join("\n");
+  const latestUserMessage = [...cleanMessages].reverse().find((message) => message.role === "user")?.text || "";
+  const relevantContext = await getRelevantPortfolioContext(latestUserMessage);
 
   try {
     const response = await genAI.models.generateContent({
@@ -146,7 +220,7 @@ app.post("/api/chat", requireAllowedChatOrigin, chatLimiter, async (req, res) =>
         temperature: 0.6,
         maxOutputTokens: 420,
         systemInstruction:
-          "You are Bryl Lim's portfolio assistant. Answer briefly and helpfully using only the portfolio facts provided: Bryl Lim is a Metro Manila based AI, software engineer, and content creator. He works with JavaScript, TypeScript, React, Next.js, Vue.js, Tailwind CSS, Node.js, Python, PHP, Laravel, PostgreSQL, MongoDB, AWS, Docker, Kubernetes, and GitHub Actions. His recent projects include CodeCred, BASE404, DIIN.PH, and DYNAMIS Workout Tracker. He is available for software development, AI engineering, speaking, mentorship, and consulting. For bookings, point visitors to https://calendly.com/bryllim/consultation. For email, use bryllim@gmail.com. Do not invent unavailable private information."
+          `You are Bryl Lim's portfolio assistant. Answer briefly and helpfully using only the portfolio facts below. If the answer is not covered, say you do not have that information and suggest emailing bryllim@gmail.com. Do not invent unavailable private information.\n\nRelevant portfolio facts:\n${relevantContext}`
       }
     });
 

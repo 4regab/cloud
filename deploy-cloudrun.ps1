@@ -7,6 +7,7 @@ param(
   [string]$BucketName = "",
   [string]$ArtifactRepo = "bryllim",
   [string]$GeminiModel = "gemini-2.5-flash",
+  [string]$GeminiEmbeddingModel = "gemini-embedding-2",
   [string]$SecretName = "gemini-api-key",
   [string]$GeminiApiKey = "",
   [int]$GlobalRateLimit = 500,
@@ -221,7 +222,7 @@ Run "Deploy Cloud Run service" @(
   $Region,
   "--allow-unauthenticated",
   "--set-env-vars",
-  "ASSET_BASE_URL=$AssetBaseUrl,GEMINI_MODEL=$GeminiModel,GLOBAL_RATE_LIMIT=$GlobalRateLimit,GLOBAL_RATE_LIMIT_WINDOW_MS=$GlobalRateLimitWindowMs,CHAT_RATE_LIMIT=$ChatRateLimit,CHAT_RATE_LIMIT_WINDOW_MS=$ChatRateLimitWindowMs,CHAT_MAX_MESSAGES=$ChatMaxMessages,CHAT_MAX_MESSAGE_LENGTH=$ChatMaxMessageLength",
+  "ASSET_BASE_URL=$AssetBaseUrl,GEMINI_MODEL=$GeminiModel,GEMINI_EMBEDDING_MODEL=$GeminiEmbeddingModel,GLOBAL_RATE_LIMIT=$GlobalRateLimit,GLOBAL_RATE_LIMIT_WINDOW_MS=$GlobalRateLimitWindowMs,CHAT_RATE_LIMIT=$ChatRateLimit,CHAT_RATE_LIMIT_WINDOW_MS=$ChatRateLimitWindowMs,CHAT_MAX_MESSAGES=$ChatMaxMessages,CHAT_MAX_MESSAGE_LENGTH=$ChatMaxMessageLength",
   "--set-secrets",
   "GEMINI_API_KEY=$SecretName`:latest"
 )
