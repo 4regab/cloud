@@ -1,6 +1,6 @@
 # Bryl Lim Portfolio on Cloud Run
 
-Plain HTML/CSS/JavaScript portfolio served by Cloud Run, with public media assets in Cloud Storage and an embedding-based chatbot endpoint.
+Plain HTML/CSS/JavaScript portfolio served by Cloud Run, with public media assets in Cloud Storage and a Gemini 2.5 Flash-Lite chatbot endpoint.
 
 ## Architecture
 
@@ -8,8 +8,8 @@ Plain HTML/CSS/JavaScript portfolio served by Cloud Run, with public media asset
 - **Cloud Storage** stores public media assets from `public/assets`.
 - **Secret Manager** stores `GEMINI_API_KEY`.
 - **Cloud Build** builds and pushes the container image to Artifact Registry.
-- **Gemini API** embeds the visitor question and the Markdown knowledge base for semantic matching. The bot returns matched Markdown context without using a generative LLM.
-- **Markdown knowledge base** lives at `content/portfolio.md`.
+- **Gemini API** uses `gemini-2.5-flash-lite` to answer from the Markdown knowledge base.
+- **Markdown knowledge base** lives at `public/context.md`.
 
 ## Deploy From Google Cloud Console
 
@@ -65,21 +65,21 @@ unzip portfolio.zip
 cd portfolio
 ```
 
-The folder should contain `Dockerfile`, `server.js`, `package.json`, `public/`, `content/`, and `deploy-cloudshell.sh`.
+The folder should contain `Dockerfile`, `server.js`, `package.json`, `public/`, and `deploy-cloudshell.sh`.
 
 ### 3. Configure The Portfolio Before Deploying
 
 Before running the Cloud Run deploy, edit the repo files for your own portfolio:
 
-- `content/portfolio.md`: chatbot knowledge base. The bot only answers from this file.
+- `public/context.md`: chatbot knowledge base. The bot only answers from this file.
 - `public/index.html`: visible portfolio content and links.
-- `public/assets`: profile image, gallery images, favicons, and other public media.
+- `public/assets`: profile image, gallery images, favicons, and other public media. Portfolio/gallery images should be WebP; favicon files can stay PNG/ICO.
 - `public/styles.css`: visual styling.
 
 In Cloud Shell, you can use the built-in editor:
 
 ```bash
-cloudshell edit content/portfolio.md
+cloudshell edit public/context.md
 ```
 
 Do not put secrets in repo files. The Gemini API key is entered during deploy and stored in Secret Manager.
@@ -105,10 +105,9 @@ Optional custom settings:
 
 ```bash
 export GEMINI_API_KEY="your-gemini-api-key"
-export GEMINI_EMBEDDING_MODEL="gemini-embedding-2"
+export GEMINI_MODEL="gemini-2.5-flash-lite"
 export CHAT_RATE_LIMIT="10"
 export GLOBAL_RATE_LIMIT="500"
-export CHAT_MIN_ANSWER_SCORE="0.16"
 
 chmod +x ./deploy-cloudshell.sh && ./deploy-cloudshell.sh \
   --project "your-project-id" \
@@ -155,8 +154,7 @@ Open the **Service URL** and verify:
 - theme toggle works
 - gallery controls work
 - chat opens
-- chat replies from matched sections in `content/portfolio.md` when a valid Gemini key is configured
-- chatbot uses `GEMINI_EMBEDDING_MODEL` for semantic matching only; it does not call a generative LLM
+- chat replies naturally using only facts from `public/context.md` when a valid Gemini key is configured
 
 You can also check from Cloud Shell:
 
@@ -198,7 +196,7 @@ To skip re-uploading assets:
 Runtime environment variables:
 
 - `GEMINI_API_KEY`: Gemini API key. Set through Secret Manager by the deploy script.
-- `GEMINI_EMBEDDING_MODEL`: embedding model used to select relevant portfolio context. Defaults to `gemini-embedding-2`.
+- `GEMINI_MODEL`: Gemini chat model. Defaults to `gemini-2.5-flash-lite`.
 - `ASSET_BASE_URL`: public Cloud Storage asset URL. Defaults to `/assets` locally.
 - `GLOBAL_RATE_LIMIT`: requests per visitor window across the site. Defaults to `500`.
 - `GLOBAL_RATE_LIMIT_WINDOW_MS`: global limiter window. Defaults to `900000`.
@@ -206,7 +204,6 @@ Runtime environment variables:
 - `CHAT_RATE_LIMIT_WINDOW_MS`: chat limiter window. Defaults to `60000`.
 - `CHAT_MAX_MESSAGES`: max recent chat messages forwarded to Gemini. Defaults to `8`.
 - `CHAT_MAX_MESSAGE_LENGTH`: max characters per chat message. Defaults to `800`.
-- `CHAT_MIN_ANSWER_SCORE`: minimum embedding similarity needed before returning a matched answer. Defaults to `0.16`.
 - `ALLOWED_CHAT_ORIGINS`: optional comma-separated list of allowed browser origins for `/api/chat`; same-origin is allowed automatically.
 - `PORT`: supplied automatically by Cloud Run. Defaults to `8080` locally.
 
@@ -225,7 +222,7 @@ Without `GEMINI_API_KEY`, the portfolio still works and `/api/chat` returns a se
 ## Security Notes
 
 - Gemini API keys are stored in Secret Manager and injected into Cloud Run only at runtime.
-- `gemini-embedding-2` is used for semantic matching. No generative Gemini model is used for chatbot replies.
+- Chat uses `gemini-2.5-flash-lite` with `public/context.md` as strict context.
 - `/api/chat` is protected by same-origin checks, JSON body size limits, global rate limiting, and chat-specific rate limiting.
 - Rate limiting is in Cloud Run instance memory. For stronger multi-instance abuse protection, add Cloud Armor, reCAPTCHA/Turnstile, or a shared Redis-backed limiter.
 - Cloud Storage is public only for media assets. Do not upload private files or secrets to the asset bucket.
@@ -248,19 +245,30 @@ gcloud run services logs read bryllim-site --region asia-southeast1 --limit 50
 Common causes:
 
 - `GEMINI_API_KEY` is missing, invalid, or has no Gemini API access.
-- `content/portfolio.md` is missing from the deployed container.
-- The selected embedding model is unavailable for the API key/project.
+- `public/context.md` is missing from the deployed container.
+- The selected Gemini model is unavailable for the API key/project. Default is `gemini-2.5-flash-lite`.
 - Gemini quota or rate limits were exceeded.
 
 ### Update chatbot knowledge
 
-Edit `content/portfolio.md`, then redeploy:
+Edit `public/context.md`, then redeploy:
 
 ```bash
 ./deploy-cloudshell.sh --project "your-project-id"
 ```
 
-The chatbot does not invent answers. It returns the best matching sections from this Markdown file or a contact fallback when there is no good match.
+The chatbot is instructed to answer only from this Markdown file and refuse unknown topics instead of inventing facts.
+
+## Convert Images To WebP
+
+Most portfolio media should be WebP before deployment:
+
+```bash
+npm install
+npm run assets:webp
+```
+
+The script converts PNG files under `public/assets` to WebP and skips `public/assets/favicons`.
 
 ## Local Windows Deployment
 

@@ -13,7 +13,7 @@ const publicDir = path.join(__dirname, "public");
 const app = express();
 const port = process.env.PORT || 8080;
 const assetBaseUrl = (process.env.ASSET_BASE_URL || "/assets").replace(/\/$/, "");
-const geminiEmbeddingModel = process.env.GEMINI_EMBEDDING_MODEL || "gemini-embedding-2";
+const geminiModel = process.env.GEMINI_MODEL || "gemini-2.5-flash-lite";
 const apiKey = process.env.GEMINI_API_KEY;
 const genAI = apiKey ? new GoogleGenAI({ apiKey }) : null;
 const assetOrigin = assetBaseUrl.startsWith("http") ? new URL(assetBaseUrl).origin : null;
@@ -23,35 +23,11 @@ const globalWindowMs = Number(process.env.GLOBAL_RATE_LIMIT_WINDOW_MS || 15 * 60
 const globalLimit = Number(process.env.GLOBAL_RATE_LIMIT || 500);
 const maxChatMessages = Number(process.env.CHAT_MAX_MESSAGES || 8);
 const maxChatMessageLength = Number(process.env.CHAT_MAX_MESSAGE_LENGTH || 800);
-const minAnswerScore = Number(process.env.CHAT_MIN_ANSWER_SCORE || 0.16);
 const allowedChatOrigins = (process.env.ALLOWED_CHAT_ORIGINS || "")
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
 let knowledgeCache;
-const keywordStopwords = new Set([
-  "the",
-  "and",
-  "for",
-  "with",
-  "what",
-  "who",
-  "how",
-  "does",
-  "have",
-  "has",
-  "his",
-  "her",
-  "bryl",
-  "lim",
-  "about",
-  "tell",
-  "show",
-  "give",
-  "you",
-  "your"
-]);
-
 app.disable("x-powered-by");
 app.set("trust proxy", 1);
 app.use((_req, res, next) => {
@@ -102,7 +78,7 @@ app.get("/config.js", (_req, res) => {
     `window.BRYL_CONFIG=${JSON.stringify({
       assetBaseUrl,
       chatEnabled: Boolean(genAI),
-      embeddingModel: geminiEmbeddingModel,
+      model: geminiModel,
       chatRateLimit: {
         limit: chatLimit,
         windowSeconds: Math.ceil(chatWindowMs / 1000)
@@ -142,172 +118,12 @@ const chatLimiter = rateLimit({
   message: { error: "Too many chat messages. Please wait a minute and try again." }
 });
 
-function getEmbeddingValues(embedding) {
-  if (!embedding) return [];
-  if (Array.isArray(embedding.embedding?.values)) return embedding.embedding.values;
-  if (Array.isArray(embedding.values)) return embedding.values;
-  if (Array.isArray(embedding.value)) return embedding.value;
-  if (Array.isArray(embedding)) return embedding;
-  return [];
-}
-
-function cosineSimilarity(a, b) {
-  let dot = 0;
-  let aMagnitude = 0;
-  let bMagnitude = 0;
-  const length = Math.min(a.length, b.length);
-
-  for (let index = 0; index < length; index += 1) {
-    dot += a[index] * b[index];
-    aMagnitude += a[index] * a[index];
-    bMagnitude += b[index] * b[index];
-  }
-
-  if (aMagnitude === 0 || bMagnitude === 0) return 0;
-  return dot / (Math.sqrt(aMagnitude) * Math.sqrt(bMagnitude));
-}
-
-function splitMarkdownKnowledge(markdown) {
-  return markdown
-    .split(/\n(?=## )/g)
-    .map((section) => section.trim())
-    .filter((section) => section.startsWith("## "))
-    .map((section) => {
-      const [headingLine, ...bodyLines] = section.split("\n");
-      return {
-        title: headingLine.replace(/^##\s*/, "").trim(),
-        text: bodyLines.join("\n").trim().replace(/\n{2,}/g, "\n")
-      };
-    })
-    .filter((section) => section.text.length > 0);
-}
-
-function keywordScore(query, section) {
-  const queryTerms = new Set(
-    query
-      .toLowerCase()
-      .replace(/[^a-z0-9\s.]/g, " ")
-      .split(/\s+/)
-      .filter((term) => term.length > 2 && !keywordStopwords.has(term))
-  );
-
-  if (queryTerms.size === 0) return 0;
-
-  const normalizedTitle = section.title.toLowerCase();
-  const normalizedText = `${section.title}\n${section.text}`.toLowerCase();
-  let score = 0;
-  queryTerms.forEach((term) => {
-    if (normalizedTitle.includes(term)) score += 2;
-    else if (normalizedText.includes(term)) score += 1;
-  });
-
-  return score / queryTerms.size;
-}
-
-function formatAnswer(matches, usedFallback = false) {
-  if (matches.length === 0) {
-    return "I don't have that information in Bryl's portfolio notes yet. You can email Bryl at bryllim@gmail.com or schedule a consultation at https://calendly.com/bryllim/consultation.";
-  }
-
-  const answer = matches
-    .map((match) => {
-      const lines = match.text
-        .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .slice(0, 5);
-      return `${match.title}\n${lines.join("\n")}`;
-    })
-    .join("\n\n");
-
-  if (!usedFallback) return answer;
-
-  return `${answer}\n\nI matched this from Bryl's portfolio notes without generating new content.`;
-}
-
 async function getKnowledgeBase() {
   if (knowledgeCache) return knowledgeCache;
 
-  const markdown = await readFile(path.join(__dirname, "content", "portfolio.md"), "utf8");
-  const sections = splitMarkdownKnowledge(markdown);
-
-  knowledgeCache = { sections, embedded: false };
-
-  if (!genAI) return knowledgeCache;
-
-  try {
-    const response = await genAI.models.embedContent({
-      model: geminiEmbeddingModel,
-      contents: sections.map((section) => `${section.title}\n${section.text}`)
-    });
-
-    const embeddings = response.embeddings || [];
-    knowledgeCache.sections = sections.map((section, index) => ({
-      ...section,
-      vector: getEmbeddingValues(embeddings[index])
-    }));
-    knowledgeCache.embedded = knowledgeCache.sections.some((section) => section.vector?.length);
-  } catch (error) {
-    console.warn("Gemini knowledge embedding failed; keyword fallback will be used", error);
-  }
-
+  const markdown = await readFile(path.join(__dirname, "public", "context.md"), "utf8");
+  knowledgeCache = markdown.trim();
   return knowledgeCache;
-}
-
-async function searchKnowledge(query) {
-  const knowledgeBase = await getKnowledgeBase();
-
-  if (!genAI || !query || !knowledgeBase.embedded) {
-    return {
-      usedFallback: true,
-      matches: knowledgeBase.sections
-        .map((section) => ({
-          ...section,
-          score: keywordScore(query, section)
-        }))
-        .filter((section) => section.score > 0)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 2)
-    };
-  }
-
-  let queryVector = [];
-  try {
-    const response = await genAI.models.embedContent({
-      model: geminiEmbeddingModel,
-      contents: [query]
-    });
-    queryVector = getEmbeddingValues(response.embeddings?.[0]);
-  } catch (error) {
-    console.warn("Gemini query embedding failed; keyword fallback will be used", error);
-  }
-
-  if (!queryVector.length) {
-    return {
-      usedFallback: true,
-      matches: knowledgeBase.sections
-        .map((section) => ({
-          ...section,
-          score: keywordScore(query, section)
-        }))
-        .filter((section) => section.score > 0)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 2)
-    };
-  }
-
-  const matches = knowledgeBase.sections
-    .map((section) => ({
-      ...section,
-      score: cosineSimilarity(queryVector, section.vector || [])
-    }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 2);
-
-  return {
-    usedFallback: false,
-    matches: matches[0]?.score >= minAnswerScore ? matches : []
-  };
 }
 
 app.post("/api/chat", requireAllowedChatOrigin, chatLimiter, async (req, res) => {
@@ -335,10 +151,23 @@ app.post("/api/chat", requireAllowedChatOrigin, chatLimiter, async (req, res) =>
   const latestUserMessage = [...cleanMessages].reverse().find((message) => message.role === "user")?.text || "";
 
   try {
-    const result = await searchKnowledge(latestUserMessage);
-    res.json({ reply: formatAnswer(result.matches, result.usedFallback) });
+    const knowledge = await getKnowledgeBase();
+    const response = await genAI.models.generateContent({
+      model: geminiModel,
+      contents: cleanMessages
+        .map((message) => `${message.role === "assistant" ? "Assistant" : "Visitor"}: ${message.text}`)
+        .join("\n"),
+      config: {
+        temperature: 0.2,
+        maxOutputTokens: 220,
+        systemInstruction:
+          `You are Bryl Lim's portfolio assistant. Use only the Markdown knowledge base below as context.\n\nRules:\n- Answer naturally in 1-4 short sentences.\n- If the visitor greets you, briefly say what you can answer about.\n- If the visitor is angry, confused, or sends nonsense, politely say you can answer questions about Bryl's projects, skills, experience, availability, and contact details.\n- If asked about a person, company, or topic not present in the Markdown, say you do not have that information in Bryl's portfolio notes.\n- Do not invent facts. Do not mention implementation details.\n\nMarkdown knowledge base:\n${knowledge}`
+      }
+    });
+
+    res.json({ reply: response.text || "I could not answer that from Bryl's portfolio notes." });
   } catch (error) {
-    console.error("Gemini embedding chat error", error);
+    console.error("Gemini chat error", error);
     res.status(500).json({ error: "Chat failed. Please try again." });
   }
 });

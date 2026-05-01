@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "check": "node --check server.js"
+    "check": "node --check server.js",
+    "assets:webp": "node scripts/convert-assets-to-webp.js"
   },
   "dependencies": {
     "@google/genai": "^1.28.0",
@@ -16,5 +17,8 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "sharp": "^0.34.5"
   }
 }

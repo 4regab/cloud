@@ -6,7 +6,7 @@ REGION="${REGION:-asia-southeast1}"
 SERVICE_NAME="${SERVICE_NAME:-bryllim-site}"
 BUCKET_NAME="${BUCKET_NAME:-}"
 ARTIFACT_REPO="${ARTIFACT_REPO:-bryllim}"
-GEMINI_EMBEDDING_MODEL="${GEMINI_EMBEDDING_MODEL:-gemini-embedding-2}"
+GEMINI_MODEL="${GEMINI_MODEL:-gemini-2.5-flash-lite}"
 SECRET_NAME="${SECRET_NAME:-gemini-api-key}"
 SKIP_ASSET_UPLOAD="${SKIP_ASSET_UPLOAD:-false}"
 GLOBAL_RATE_LIMIT="${GLOBAL_RATE_LIMIT:-500}"
@@ -15,7 +15,6 @@ CHAT_RATE_LIMIT="${CHAT_RATE_LIMIT:-10}"
 CHAT_RATE_LIMIT_WINDOW_MS="${CHAT_RATE_LIMIT_WINDOW_MS:-60000}"
 CHAT_MAX_MESSAGES="${CHAT_MAX_MESSAGES:-8}"
 CHAT_MAX_MESSAGE_LENGTH="${CHAT_MAX_MESSAGE_LENGTH:-800}"
-CHAT_MIN_ANSWER_SCORE="${CHAT_MIN_ANSWER_SCORE:-0.16}"
 
 usage() {
   cat <<EOF
@@ -27,7 +26,7 @@ Optional:
   --service SERVICE_NAME            Default: bryllim-site
   --bucket BUCKET_NAME              Default: PROJECT_ID-bryllim-assets
   --repo ARTIFACT_REPO              Default: bryllim
-  --embedding-model MODEL           Default: gemini-embedding-2
+  --model GEMINI_MODEL              Default: gemini-2.5-flash-lite
   --secret SECRET_NAME              Default: gemini-api-key
   --skip-assets                     Skip Cloud Storage asset upload
 
@@ -58,8 +57,8 @@ while [[ $# -gt 0 ]]; do
       ARTIFACT_REPO="$2"
       shift 2
       ;;
-    --embedding-model)
-      GEMINI_EMBEDDING_MODEL="$2"
+    --model)
+      GEMINI_MODEL="$2"
       shift 2
       ;;
     --secret)
@@ -180,7 +179,7 @@ run "Deploy Cloud Run service" gcloud run deploy "$SERVICE_NAME" \
   --image "$IMAGE" \
   --region "$REGION" \
   --allow-unauthenticated \
-  --set-env-vars "ASSET_BASE_URL=${ASSET_BASE_URL},GEMINI_EMBEDDING_MODEL=${GEMINI_EMBEDDING_MODEL},GLOBAL_RATE_LIMIT=${GLOBAL_RATE_LIMIT},GLOBAL_RATE_LIMIT_WINDOW_MS=${GLOBAL_RATE_LIMIT_WINDOW_MS},CHAT_RATE_LIMIT=${CHAT_RATE_LIMIT},CHAT_RATE_LIMIT_WINDOW_MS=${CHAT_RATE_LIMIT_WINDOW_MS},CHAT_MAX_MESSAGES=${CHAT_MAX_MESSAGES},CHAT_MAX_MESSAGE_LENGTH=${CHAT_MAX_MESSAGE_LENGTH},CHAT_MIN_ANSWER_SCORE=${CHAT_MIN_ANSWER_SCORE}" \
+  --set-env-vars "ASSET_BASE_URL=${ASSET_BASE_URL},GEMINI_MODEL=${GEMINI_MODEL},GLOBAL_RATE_LIMIT=${GLOBAL_RATE_LIMIT},GLOBAL_RATE_LIMIT_WINDOW_MS=${GLOBAL_RATE_LIMIT_WINDOW_MS},CHAT_RATE_LIMIT=${CHAT_RATE_LIMIT},CHAT_RATE_LIMIT_WINDOW_MS=${CHAT_RATE_LIMIT_WINDOW_MS},CHAT_MAX_MESSAGES=${CHAT_MAX_MESSAGES},CHAT_MAX_MESSAGE_LENGTH=${CHAT_MAX_MESSAGE_LENGTH}" \
   --set-secrets "GEMINI_API_KEY=${SECRET_NAME}:latest"
 
 SERVICE_URL="$(gcloud run services describe "$SERVICE_NAME" --region "$REGION" --format="value(status.url)")"

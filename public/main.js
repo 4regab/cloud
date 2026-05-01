@@ -76,7 +76,7 @@ function renderGallery() {
   galleryTrack.innerHTML = "";
   galleryImages.forEach((imageNumber) => {
     const img = document.createElement("img");
-    img.src = assetUrl(`gallery/gallery-${imageNumber}.png`);
+    img.src = assetUrl(`gallery/gallery-${imageNumber}.webp`);
     img.alt = `Gallery image ${imageNumber}`;
     img.loading = "lazy";
     galleryTrack.append(img);
