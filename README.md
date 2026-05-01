@@ -15,6 +15,13 @@ Plain HTML/CSS/JavaScript portfolio served by Cloud Run, with public media asset
 
 Use this path when deploying from the GCP Console browser UI.
 
+Deployment has two parts:
+
+1. **Clone or upload the repo into Cloud Shell.** This gives Cloud Shell the source code.
+2. **Run the deploy script.** This configures Google Cloud resources and deploys Cloud Run.
+
+Cloning the repo alone does not create Cloud Run, Cloud Storage, Secret Manager, or Gemini configuration.
+
 ### 1. Prepare Your GCP Project
 
 In [Google Cloud Console](https://console.cloud.google.com/):
@@ -34,18 +41,20 @@ If it is not the right project:
 gcloud config set project "your-project-id"
 ```
 
-### 2. Put The Code In Cloud Shell
+### 2. Clone The Repo In Cloud Shell
 
 Cloud Shell needs a copy of this project before it can deploy.
 
-If the project is in GitHub:
+Recommended GitHub flow:
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git
 cd YOUR_REPO
 ```
 
-If you have a ZIP file instead:
+If you fork this portfolio, replace `YOUR_USERNAME/YOUR_REPO` with your fork URL.
+
+Alternative ZIP upload flow:
 
 1. In Cloud Shell, click **More** > **Upload**.
 2. Upload the ZIP.
@@ -58,7 +67,24 @@ cd portfolio
 
 The folder should contain `Dockerfile`, `server.js`, `package.json`, `public/`, `content/`, and `deploy-cloudshell.sh`.
 
-### 3. Deploy With One Command
+### 3. Configure The Portfolio Before Deploying
+
+Before running the Cloud Run deploy, edit the repo files for your own portfolio:
+
+- `content/portfolio.md`: chatbot knowledge base. The bot only answers from this file.
+- `public/index.html`: visible portfolio content and links.
+- `public/assets`: profile image, gallery images, favicons, and other public media.
+- `public/styles.css`: visual styling.
+
+In Cloud Shell, you can use the built-in editor:
+
+```bash
+cloudshell edit content/portfolio.md
+```
+
+Do not put secrets in repo files. The Gemini API key is entered during deploy and stored in Secret Manager.
+
+### 4. Configure And Deploy Cloud Run With One Command
 
 Interactive form, safest for manual use:
 
@@ -91,7 +117,9 @@ chmod +x ./deploy-cloudshell.sh && ./deploy-cloudshell.sh \
   --bucket "your-project-id-bryllim-assets"
 ```
 
-### 4. What The Script Creates
+This command does the Cloud Run/GCP configuration. It is not just a local build command.
+
+### 5. What The Script Configures In GCP
 
 The Cloud Shell deploy script creates or reuses:
 
@@ -111,7 +139,7 @@ It also:
 - injects `GEMINI_API_KEY` into Cloud Run from Secret Manager
 - configures default rate limits for the chat endpoint
 
-### 5. Verify Deployment
+### 6. Verify Deployment
 
 At the end, the script prints:
 
@@ -144,13 +172,20 @@ Expected response:
 
 ## Updating The Site
 
-After changing files, redeploy from Cloud Shell:
+After changing repo files, redeploy from Cloud Shell:
 
 ```bash
 ./deploy-cloudshell.sh --project "your-project-id"
 ```
 
 The script is idempotent. It reuses existing GCP resources, uploads the latest assets, creates a new Gemini secret version if `GEMINI_API_KEY` is provided, rebuilds the image, and deploys a new Cloud Run revision.
+
+If your code lives in GitHub, the normal update flow is:
+
+```bash
+git pull
+./deploy-cloudshell.sh --project "your-project-id"
+```
 
 To skip re-uploading assets:
 
